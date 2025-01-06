@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import adata
 import connection
-# import update
+import update
 now = datetime.datetime.now()
 # 格式化日期为 yyyy-mm-dd
 today = now.strftime('%Y-%m-%d')
@@ -13,7 +13,7 @@ df['stock_code'] = df['stock_code'].astype(str)
 
 # 假设 df 是你的股票代码列表 DataFrame
 all_data = []  # 创建一个空列表用于存储所有结果
-start_date = con.select()
+start_date = connection.select()
 for i, v in df.iterrows():
     print(i)
     # 获取特定股票的历史市场数据

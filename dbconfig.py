@@ -19,3 +19,4 @@ connection = mysql.connector.connect(
     host='127.0.0.1',  # 或者你的服务器IP地址
     database='trade'
 )
+

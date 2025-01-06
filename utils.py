@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pandas as pd
 import bisect
 import pandas_market_calendars as mcal
@@ -54,3 +56,11 @@ try:
     print(previous_trading_days)
 except ValueError as e:
     print(e)
+
+def get_today():
+    now = datetime.now()
+    # 格式化日期为 yyyy-mm-dd
+    today = now.strftime('%Y-%m-%d')
+    return today
+
+
