@@ -25,13 +25,15 @@ def findStock(stock_code, year,start_date=None,end_date=None,step=0):
                 volume = v['volume']
                 # volume = 0
             if i == 3 and (index+step)<len(result) and v["change_pct"]<5  :
-                print(stock_code)
                 value = {
                     "stock_code":stock_code,
                     "trade_date":v["trade_date"],
                     "change_pct":(result[index+step]['close']-result[index+step]['open'])/result[index+step]['open']*100
                 }
-                arr.append(value)
+                if step ==0 and str(v["trade_date"])==utils.get_today():
+                    arr.append(value)
+                if step ==1 and str(v["trade_date"])=='2025-01-07':
+                    arr.append(value)
         else:
             i = 0
             volume = 0
@@ -44,15 +46,11 @@ def fallback():
     all_sum_pct = 0
     all_count = 0
     for i, v in df.iterrows():
-        # if v['stock_code'] != '000029':
-        #     continue
-        if i>600:
-            break
         if v['stock_code'].startswith("60") or v['stock_code'].startswith("00") :
             sum_pct = 0
             count = 0
-            for year in range(2025,2024+1):
-                b = findStock(v['stock_code'], year, f'{year}-01-01', f'{year}-12-31')
+            for year in range(2025,2025+1):
+                b = findStock(v['stock_code'], year, f'2025-01-01', utils.get_today(),1)
                 if len(b)>0:
                     for item in b:
                         count = count+1
@@ -60,8 +58,6 @@ def fallback():
                         all_count = all_count+1
                         all_sum_pct = all_sum_pct+item["change_pct"]
                         print(f'{v['stock_code']},{item}')
-                    average_a = sum(item["change_pct"] for item in b) / len(b)
-                    print(f'{year},{average_a}')
             if count>0:
                 print(f'{v['stock_code']},{sum_pct/count}')
     print(f'sss{all_sum_pct/all_count},{all_sum_pct},{all_count}')
@@ -72,8 +68,8 @@ def find():
     all_sum_pct = 0
     all_count = 0
     for i, v in df.iterrows():
-        if not v['stock_code'].startswith("68") and not v['stock_code'].startswith("30"):
-            b = findStock(v['stock_code'], 2025, '2025-01-02', utils.get_today())
+        if not v['stock_code'].startswith("68") and not v['stock_code'].startswith("30") and not v['stock_code'].startswith("8"):
+            b = findStock(v['stock_code'], 2025, '2025-01-02', utils.get_today(),0)
             if len(b) > 0:
                 for item in b:
                     all_count = all_count + 1
@@ -81,5 +77,8 @@ def find():
                     print(f'{v['stock_code']},{item}')
     print(f'sss{all_sum_pct / all_count},{all_sum_pct},{all_count}')
 
+#找出今日红三兵
 find()
 
+#回测昨日红三兵
+# fallback()

@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import adata
 import connection
-import update
+# import update
 now = datetime.datetime.now()
 # 格式化日期为 yyyy-mm-dd
 today = now.strftime('%Y-%m-%d')
@@ -53,7 +53,7 @@ engine = create_engine('mysql+mysqlconnector://{user}:{password}@{host}/{databas
 
 
 # 将DataFrame中的数据写入MySQL表
-table_name = 'market_2024'  # 替换为你的表名
+table_name = 'market_2025'  # 替换为你的表名
 # final_df = final_df.drop(columns=['Unnamed: 0'])
 
 final_df.to_sql(name=table_name, con=engine, if_exists='append', index=False)
