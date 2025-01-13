@@ -1,7 +1,7 @@
 import adata
 import pandas as pd
 import json
-
+from config.tushare_utils import pro,calculate_pct
 
 start_year = 2015
 market_info_dict = {}
@@ -17,54 +17,57 @@ for i in range(start_year, 2024 + 1):
 
 def findStock(stock_code, year):
     # 使用布尔索引进行多条件过滤
-    try:
-        df = market_info_dict[year][(market_info_dict[year]['stock_code'] == stock_code)]
-        result = df.to_dict('records')
-        arr = []
-        i = 0
-        volume = 0
-        for index, v in enumerate(result):
-            # if v['close'] > v['open'] and v["change_pct"] < 5 and result[index]["high"] > result[index - 1]["high"]:
-            if v['close'] > v['open'] and result[index]["high"] > result[index - 1]["high"]:
-                if i == 0 or (i != 0 and v['volume'] > volume):
-                    volume = v['volume']
-                    i = i + 1
-                else:
-                    i = 1
-                    volume = v['volume']
-                # if i == red_day and (index + sale_day) < len(result) and v["change_pct"] < 5 and v["change_pct"] > 1:
-                if i == red_day and (index + sale_day) < len(result) and result[index + 1]['open']>0:
-                    value = {
-                        "stock_code": stock_code,
-                        "trade_date": v["trade_date"],
-                        "change_pct": (result[index + sale_day]['close'] - result[index + 1]['open']) / result[index + 1]['open'] * 100
-                    }
-                    arr.append(value)
+    global arr
+
+    df = market_info_dict[year][(market_info_dict[year]['stock_code'] == stock_code)]
+    result = df.to_dict('records')
+    arr = []
+    i = 0
+    volume = 0
+    for index, v in enumerate(result):
+        # if v['close'] > v['open'] and v["change_pct"] < 5 and result[index]["high"] > result[index - 1]["high"]:
+        if v['close'] > v['open'] and result[index]["high"] > result[index - 1]["high"]:
+            if i == 0 or (i != 0 and v['volume'] > volume):
+                volume = v['volume']
+                i = i + 1
             else:
-                i = 0
-                volume = 0
-    except :
-        print(1)
-        pass
+                i = 1
+                volume = v['volume']
+            if i == red_day and (index + sale_day) < len(result) and v["change_pct"] < 5 :
+                sz_pct = calculate_pct(result[index + 1]['trade_date'].replace('-',''),result[index + sale_day]['trade_date'].replace('-',''))
+                value = {
+                    "index":index,
+                    "stock_code": stock_code,
+                    "trade_date": v["trade_date"],
+                    "change_pct": (result[index + sale_day]['close'] - result[index + 1]['open']) / result[index + 1]['open'] * 100,
+                    "sz_pct":sz_pct
+                }
+                arr.append(value)
+        else:
+            i = 0
+            volume = 0
+
     return arr
 
 
-df = adata.stock.info.all_code()
+df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date,market')
 
 
 def fallback():
     all_arr = []
     all_sum_pct = 0
     all_count = 0
+    all_sz_pct = {}
     for i, v in df.iterrows():
         # if i<0:
         #     continue
-        if v['stock_code'].startswith("68") or v['stock_code'].startswith("30") or v['stock_code'].startswith("4"):
+        symbol = v['symbol']
+        if symbol.startswith("68") or symbol.startswith("30") or symbol.startswith("4"):
             continue
         sum_pct = 0
         count = 0
         for year in range(start_year, 2024 + 1):
-            b = findStock(v['stock_code'], year)
+            b = findStock(symbol, year)
             if len(b) > 0:
                 all_arr.extend(b)
                 for item in b:
@@ -72,13 +75,14 @@ def fallback():
                     sum_pct = sum_pct + item["change_pct"]
                     all_count = all_count + 1
                     all_sum_pct = all_sum_pct + item["change_pct"]
-                    print(f'{v['stock_code']},{item}')
+                    all_sz_pct[item['trade_date']] =  item["sz_pct"]
+                    print(f'{symbol},{item}')
                 average_a = sum(item["change_pct"] for item in b) / len(b)
                 print(f'{year},{average_a}')
         if count > 0:
-            print(f'{v['stock_code']},{sum_pct / count}')
-    with open('data.json', 'w', encoding='utf-8') as f:
-        json.dump(all_arr, f, ensure_ascii=False, indent=4)
+            print(f'{symbol},{sum_pct / count}')
+    # with open('data.json', 'w', encoding='utf-8') as f:
+    #     json.dump(all_arr, f, ensure_ascii=False, indent=4)
     print(f'{all_sum_pct / all_count},{all_sum_pct},{all_count}')
 
 
