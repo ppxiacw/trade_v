@@ -4,9 +4,9 @@ import dbconfig
 import pandas as pd
 
 import utils
-
-today = utils.get_today()
-yesterday = utils.get_date_by_step(utils.get_today(),-1)
+ut = utils.StockAnalysis()
+today = ut.get_today()
+yesterday = ut.get_date_by_step(ut.get_today(),-1)
 query = (f'select * from market_2025 where  trade_date>="2025-01-01"   and trade_date<="{today}"')
 
 vdf = pd.read_sql(query, dbconfig.engine)
@@ -67,7 +67,7 @@ def fallback():
                 pass
                 # print(f'{v['stock_code']},{sum_pct/count}')
     for i, e in enumerate(all_arr):
-        all_arr[i] = e | utils.find_stock_info(e['stock_code']).to_dict()
+        all_arr[i] = e | utils.StockAnalysis().find_stock_info(e['stock_code']).to_dict()
     sorted_arr = sorted(all_arr, key=lambda x: float(x['change_pct']),reverse=True)
     for s_v in  sorted_arr:
         print(s_v)
@@ -88,7 +88,7 @@ def find():
                     print(f'{v['stock_code']},{item}')
     print(f'sss{all_sum_pct / all_count},{all_sum_pct},{all_count}')
 
-#找出今日红三兵
+# #找出今日红三兵
 # find()
 
 # 回测昨日红三兵

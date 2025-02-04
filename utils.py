@@ -2,69 +2,79 @@ from datetime import datetime
 import pandas as pd
 import adata
 
-import dbconfig
 
+class StockAnalysis:
+    def __init__(self):
+        self.calendar_cache = None  # 缓存交易日历
+        self.stock_info_df = None  # 缓存股票信息数据框
 
-def get_date_by_step(date, n):
-    calendar = adata.stock.info.trade_calendar(date[:4])
-    start_index = calendar[calendar['trade_date'] == date].index[0] if not calendar[
-        calendar['trade_date'] == date].empty else None
+    def get_trade_calendar(self, year=None):
+        if not year:
+            year = datetime.now().year
+        if not self.calendar_cache or str(year) not in self.calendar_cache:
+            self.calendar_cache = {str(year): adata.stock.info.trade_calendar(str(year))}
+        return self.calendar_cache[str(year)]
 
-    if start_index is not None:
-        selected_rows = []
+    def get_date_by_step(self, date_str, n):
+        calendar = self.get_trade_calendar(date_str[:4])
+        start_index = calendar[calendar['trade_date'] == date_str].index[0] if not calendar[
+            calendar['trade_date'] == date_str].empty else None
 
-        if n > 0:
-            # 正数：向后 n 个数据中选择，且 trade_status 为 1
-            for i in range(start_index, len(calendar)):
-                row = calendar.iloc[i]
-                if row['trade_status'] == '1':
-                    selected_rows.append(row)
-                    if len(selected_rows) >= n + 1:
-                        break
+        if start_index is not None:
+            selected_rows = []
 
-            result_df = pd.DataFrame(selected_rows)  # 保持原始顺序（向后）
-        elif n < 0:
-            # 负数：向前 n 个数据中选择，且 trade_status 为 1
-            for i in range(start_index, -1, -1):
-                row = calendar.iloc[i]
-                if row['trade_status'] == '1':
-                    selected_rows.append(row)
-                    if len(selected_rows) >= abs(n - 1):
-                        break
-
-            result_df = pd.DataFrame(selected_rows).iloc[::-1]  # 恢复原始顺序（向前）
+            if n > 0:
+                for i in range(start_index, len(calendar)):
+                    row = calendar.iloc[i]
+                    if row['trade_status'] == '1':
+                        selected_rows.append(row)
+                        if len(selected_rows) >= n + 1:
+                            break
+                result_df = pd.DataFrame(selected_rows)['trade_date']
+                return result_df.iloc[-1]
+            elif n < 0:
+                for i in range(start_index, -1, -1):
+                    row = calendar.iloc[i]
+                    if row['trade_status'] == '1':
+                        selected_rows.append(row)
+                        if len(selected_rows) >= abs(n-1):
+                            break
+                result_df = pd.DataFrame(selected_rows)['trade_date']
+                return result_df.iloc[-1]
+                # 恢复原始顺序（向前）
+            else:
+                result_df = pd.DataFrame()  # 如果 n 是 0，则返回空 DataFrame
         else:
-            result_df = pd.DataFrame()  # 如果 n 是 0，则返回空 DataFrame
+            print(f"没有找到 trade_date 为 {date_str} 的记录")
+            return None
 
-        return result_df.iloc[0]['trade_date']
-    else:
-        print(f"没有找到 trade_date 为 {date} 的记录")
+    def get_today(self):
+        now = datetime.now()
+        today_str = now.strftime('%Y-%m-%d')
+        calendar = self.get_trade_calendar(today_str[:4])
+        index = calendar[calendar['trade_date'] == today_str].index[0] if not calendar[
+            calendar['trade_date'] == today_str].empty else None
 
+        if index is not None and calendar.loc[index]['trade_status'] == '0':
+            for i in reversed(range(0, index)):
+                if calendar.loc[i]['trade_status'] == '1':
+                    return calendar.loc[i]['trade_date']
+        elif index is not None:
+            return today_str
+        else:
+            return None
 
-def get_today():
-    now = datetime.now()
-    # 格式化日期为 yyyy-mm-dd
-    today = now.strftime('%Y-%m-%d')
-    calendar = adata.stock.info.trade_calendar(today[:4])
-    index = calendar[calendar['trade_date'] == today].index[0]
-    if calendar.loc[index]['trade_status'] == '0':
-        for i in reversed(range(0, index)):
-            if calendar.loc[i]['trade_status'] == '1':
-                return calendar.loc[i]['trade_date']
-    else:
-        return today
+    def find_stock_info(self, stock_code):
+        # 如果 df 尚未加载，则加载它并保存为类属性
+        if self.stock_info_df is None:
+            self.stock_info_df = pd.read_csv("C:/Users/曹威/PycharmProjects/pythonProject/files/stock_list.csv",dtype={'symbol':str})
 
-
-
-
-
-def find_stock_info(stock_code):
-    # 如果 df 尚未加载，则加载它并保存为函数的属性
-    if not hasattr(find_stock_info, "df"):
-        query = 'select * from stock'
-        find_stock_info.df = pd.read_sql(query, dbconfig.engine)
-
-    # 使用已经加载的数据框进行查询
-    return find_stock_info.df[find_stock_info.df['stock_code'] == stock_code]
+        # 使用已经加载的数据框进行查询
+        return self.stock_info_df[self.stock_info_df['symbol'] == stock_code]
 
 
+# 使用类进行分析
+if __name__ == "__main__":
+    analysis = StockAnalysis()
+    # print(analysis.find_stock_info("000001"))
+    print(analysis.get_date_by_step('2025-01-09', 2))
