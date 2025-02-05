@@ -3,7 +3,7 @@ from  pattern.RedStar import RedStar
 from config.tushare_utils import IndexAnalysis
 
 large_cap_stocks = pd.read_csv('../files/stock_list_filter.csv',dtype={'symbol':str})
-
+large_cap_stocks = large_cap_stocks[~large_cap_stocks['name'].str.contains('ST', na=False)]
 # large_cap_stocks = vs[vs['market_cap_billion'] > 100]['ts_code'].tolist()
 large_cap_stocks = large_cap_stocks['ts_code'].tolist()
 
@@ -18,6 +18,6 @@ for i in range(0, len(large_cap_stocks), batch_size):
     for quote in quotes:
         if RedStar.valid(quote):
             print(quote.ts_code)
+            arr.append(quotes)
 
-    arr.append(quotes)
 print(len(arr))

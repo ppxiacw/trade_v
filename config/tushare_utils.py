@@ -6,7 +6,8 @@ from datetime import datetime  # 正确导入 datetime 类
 token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
-
+df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
+df.to_csv('../files/stock_list.csv',index=False)
 stock_list = pd.read_csv('../files/stock_list.csv',dtype={'symbol':str})
 class IndexAnalysis:
     def __init__(self):

@@ -26,7 +26,9 @@ class RedStar:
             else:
                 top_line = abs(close - df.high) / close
                 bottom_line = ((open - low) / open)
-            if physical_size == 0:
+            if bottom_line<top_line:
+                return False
+            if physical_size == 0 and 9 > change_pct > -9.8:
                 if  bottom_line>0.02:
                     return True
                 else:
@@ -40,4 +42,4 @@ class RedStar:
             return False
 
 
-print(RedStar.valid(IndexAnalysis.get_stock_daily('603878','20241016')))
+print(RedStar.valid(IndexAnalysis.get_stock_daily('600261','20250205')))
