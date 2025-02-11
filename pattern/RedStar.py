@@ -34,8 +34,7 @@ class RedStar:
                 else:
                     return False
             # 实体不超过百分之一
-            if (bottom_line / physical_size > 3) and 9 > change_pct > -9.8:
-                print(f'{bottom_line / physical_size}==={df.ts_code}')
+            if (bottom_line / physical_size > 2) and 9 > change_pct > -9.8:
                 return bottom_line / physical_size
             else:
                 return False
@@ -43,4 +42,4 @@ class RedStar:
             return False
 
 
-print(RedStar.valid(IndexAnalysis.get_stock_daily('002927','20250205')))
+# print(RedStar.valid(IndexAnalysis.get_stock_daily('002927','20250205')))

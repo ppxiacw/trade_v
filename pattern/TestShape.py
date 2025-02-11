@@ -22,7 +22,6 @@ relative_path = os.path.join(parent_dir_path, 'files')
 
 large_cap_stocks = pd.read_csv(f'{relative_path}/stock_list_filter_test.csv',dtype={'symbol':str})
 large_cap_stocks = large_cap_stocks[~large_cap_stocks['name'].str.contains('ST', na=False)]
-# large_cap_stocks = vs[vs['market_cap_billion'] > 100]['ts_code'].tolist()
 large_cap_stocks = large_cap_stocks['ts_code'].tolist()
 
 arr = []
