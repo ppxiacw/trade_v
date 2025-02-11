@@ -3,12 +3,29 @@ import pandas as pd
 from dto.StockDataDay import StockDataDay
 from dto.RealTimeStockData import RealTimeStockData
 from datetime import datetime  # 正确导入 datetime 类
+
+import os
+
+# 获取当前脚本的完整路径
+current_path = os.path.abspath(__file__)
+
+# 获取当前脚本的目录
+dir_path = os.path.dirname(current_path)
+
+# 获取当前脚本的上级目录
+parent_dir_path = os.path.dirname(dir_path)
+
+# 构造相对路径
+relative_path = os.path.join(parent_dir_path, 'files')
+
+
+
 token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
 df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
-df.to_csv('../files/stock_list.csv',index=False)
-stock_list = pd.read_csv('../files/stock_list.csv',dtype={'symbol':str})
+df.to_csv(f'{relative_path}/stock_list.csv',index=False)
+stock_list = pd.read_csv(f'{relative_path}/stock_list.csv',dtype={'symbol':str})
 class IndexAnalysis:
     def __init__(self):
         pass
