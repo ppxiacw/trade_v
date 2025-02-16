@@ -4,6 +4,7 @@ import pandas as pd
 from flask import send_file
 
 from  pattern.RedStar import RedStar
+from pattern.NewHigh import NewHigh
 from config.tushare_utils import IndexAnalysis
 
 import os
@@ -55,3 +56,14 @@ def find_bottom_line():
     return send_file('codes.txt', as_attachment=True)
 
 
+def find_new_high():
+    codes = []
+    for i in range(0, len(large_cap_stocks), batch_size):
+        batch = large_cap_stocks[i:i + batch_size]
+        # 关键点：直接传入当前批次的 ts_code 数组
+        quotes = IndexAnalysis.realtime_quote(','.join(f'{x}' for x in batch))
+        for quote in quotes:
+            value = NewHigh.valid(quote)
+            if value:
+                codes.append(quote.ts_code)
+    return str(codes)

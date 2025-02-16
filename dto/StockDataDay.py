@@ -23,7 +23,7 @@ class StockDataDay:
     @staticmethod
     def from_daily_dataframe(df):
         """
-        从 DataFrame 创建 StockData 实例。
+        从 DataFrame 创建 StockDataDay 实例列表。
         DataFrame 的列名需要与类的属性名一致。
         """
         # 确保 DataFrame 的列名与类的属性名一致
@@ -32,20 +32,25 @@ class StockDataDay:
         if not all(column in df.columns for column in required_columns):
             raise ValueError(f"DataFrame 必须包含以下列: {required_columns}")
 
-        # 从 DataFrame 中提取数据并创建实例
-        return StockDataDay(
-            ts_code=df['ts_code'].values[0],
-            trade_date=df['trade_date'].values[0],
-            open=df['open'].values[0],
-            high=df['high'].values[0],
-            low=df['low'].values[0],
-            close=df['close'].values[0],
-            pre_close=df['pre_close'].values[0],
-            change=df['change'].values[0],
-            pct_chg=df['pct_chg'].values[0],
-            vol=df['vol'].values[0],
-            amount=df['amount'].values[0]
-        )
+        # 根据 DataFrame 中的每一行数据创建 StockDataDay 实例列表
+        stock_data_list = []
+        for index, row in df.iterrows():
+            stock_data = StockDataDay(
+                ts_code=row['ts_code'],
+                trade_date=row['trade_date'],
+                open=row['open'],
+                high=row['high'],
+                low=row['low'],
+                close=row['close'],
+                pre_close=row['pre_close'],
+                change=row['change'],
+                pct_chg=row['pct_chg'],
+                vol=row['vol'],
+                amount=row['amount']
+            )
+            stock_data_list.append(stock_data)
+
+        return stock_data_list
 
     @staticmethod
     def from_json(df):

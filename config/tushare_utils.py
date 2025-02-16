@@ -3,7 +3,8 @@ import pandas as pd
 from dto.StockDataDay import StockDataDay
 from dto.RealTimeStockData import RealTimeStockData
 from datetime import datetime  # 正确导入 datetime 类
-
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
 
 # 获取当前脚本的完整路径
@@ -23,8 +24,7 @@ relative_path = os.path.join(parent_dir_path, 'files')
 token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
-df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
-df.to_csv(f'{relative_path}/stock_list.csv',index=False)
+
 stock_list = pd.read_csv(f'{relative_path}/stock_list.csv',dtype={'symbol':str})
 class IndexAnalysis:
     def __init__(self):
@@ -67,16 +67,37 @@ class IndexAnalysis:
 if __name__ == "__main__":
 
     # 读取原始文件
-    df = pd.read_csv('../files/stock_list.csv', dtype={'symbol': str})
-    # 提取前两位字符（针对ts_code列）
-    df['code_prefix'] = df['ts_code'].str[:2]
+    all_data = []
+    df = pd.read_csv('../files/stock_list_filter_test.csv', dtype={'symbol': str})
+    for i,v in df.iterrows():
+        # v1 = IndexAnalysis.get_stock_daily(v['ts_code'], '20240924','20250214')
+        v = ts.pro_bar(ts_code=v['ts_code'], adj='qfq', start_date='20240924', end_date='20250214')
+        if not v.empty:  # 检查返回的 DataFrame 是否为空
+            all_data.append(v)
 
-    # 筛选条件
-    filtered_df = df[(df['code_prefix'] == '60') | (df['code_prefix'] == '00')]
+    if all_data:
+        final_df = pd.concat(all_data, ignore_index=True)
+    else:
+        final_df = pd.DataFrame()
 
-    # 删除临时列
-    filtered_df = filtered_df.drop(columns=['code_prefix'])
+    from sqlalchemy import create_engine
 
-    # 保存到新文件
-    filtered_df.to_csv('stock_list_filter.csv', index=False, encoding='utf-8-sig')
-    print("筛选完成！文件已保存为 stock_list_filter.csv")
+    # MySQL连接信息
+    db_config = {
+        "user": "root",
+        "password": "123456",
+        "host": "47.103.135.146",  # 或者你的服务器IP地址
+        "database": "trade"
+    }
+
+    # 创建MySQL连接引擎
+    engine = create_engine('mysql+mysqlconnector://{user}:{password}@{host}/{database}'.format(
+        **db_config))
+
+    # 将DataFrame中的数据写入MySQL表
+    table_name = 'market'  # 替换为你的表名
+    # final_df = final_df.drop(columns=['Unnamed: 0'])
+
+    final_df.to_sql(name=table_name, con=engine, if_exists='append', index=False)
+
+    print(f"Data successfully imported into {table_name}")

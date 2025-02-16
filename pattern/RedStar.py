@@ -42,4 +42,4 @@ class RedStar:
             return False
 
 
-# print(RedStar.valid(IndexAnalysis.get_stock_daily('002927','20250205')))
+ #print(RedStar.valid(IndexAnalysis.get_stock_daily('002927','20250212')))
