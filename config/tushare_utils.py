@@ -6,6 +6,7 @@ from datetime import datetime  # 正确导入 datetime 类
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
+from dbconfig import engine,db_config
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -68,36 +69,13 @@ if __name__ == "__main__":
 
     # 读取原始文件
     all_data = []
-    df = pd.read_csv('../files/stock_list_filter_test.csv', dtype={'symbol': str})
+    df = pd.read_csv('../files/stock_list_filter.csv', dtype={'symbol': str})
     for i,v in df.iterrows():
-        # v1 = IndexAnalysis.get_stock_daily(v['ts_code'], '20240924','20250214')
+        print(v['ts_code'])
         v = ts.pro_bar(ts_code=v['ts_code'], adj='qfq', start_date='20240924', end_date='20250214')
         if not v.empty:  # 检查返回的 DataFrame 是否为空
-            all_data.append(v)
+            v.to_sql(name='market', con=engine, if_exists='append', index=False)
 
-    if all_data:
-        final_df = pd.concat(all_data, ignore_index=True)
-    else:
-        final_df = pd.DataFrame()
 
-    from sqlalchemy import create_engine
 
-    # MySQL连接信息
-    db_config = {
-        "user": "root",
-        "password": "123456",
-        "host": "47.103.135.146",  # 或者你的服务器IP地址
-        "database": "trade"
-    }
 
-    # 创建MySQL连接引擎
-    engine = create_engine('mysql+mysqlconnector://{user}:{password}@{host}/{database}'.format(
-        **db_config))
-
-    # 将DataFrame中的数据写入MySQL表
-    table_name = 'market'  # 替换为你的表名
-    # final_df = final_df.drop(columns=['Unnamed: 0'])
-
-    final_df.to_sql(name=table_name, con=engine, if_exists='append', index=False)
-
-    print(f"Data successfully imported into {table_name}")
