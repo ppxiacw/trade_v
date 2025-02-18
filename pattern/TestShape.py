@@ -21,7 +21,7 @@ parent_dir_path = os.path.dirname(dir_path)
 # 构造相对路径
 relative_path = os.path.join(parent_dir_path, 'files')
 
-large_cap_stocks = pd.read_csv(f'{relative_path}/stock_list_filter_test.csv',dtype={'symbol':str})
+large_cap_stocks = pd.read_csv(f'{relative_path}/stock_list_filter.csv',dtype={'symbol':str})
 large_cap_stocks = large_cap_stocks[~large_cap_stocks['name'].str.contains('ST', na=False)]
 large_cap_stocks = large_cap_stocks['ts_code'].tolist()
 

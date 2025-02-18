@@ -22,7 +22,7 @@ def find():
 
 
 
-@app.route('/find_nwe_high')
+@app.route('/find_new_high')
 def find_nwe_high():
     value = find_new_high()
     return value
