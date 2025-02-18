@@ -54,7 +54,7 @@ class IndexAnalysis:
 
     @staticmethod
     def realtime_quote(ts_code):
-        v:pd = ts.realtime_quote(ts_code=ts_code)
+        v:pd = ts.realtime_quote(ts_code=ts_code, src='dc')
         arr = []
         for item in v.iterrows():
             arr.append(RealTimeStockData.from_dataframe(item[1].to_frame().T))
