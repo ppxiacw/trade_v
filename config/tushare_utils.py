@@ -6,7 +6,6 @@ from datetime import datetime  # 正确导入 datetime 类
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
-from dbconfig import engine,db_config
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -70,15 +69,6 @@ class IndexAnalysis:
 
 # 使用类进行分析
 if __name__ == "__main__":
-
-    # 读取原始文件
-    all_data = []
-    df = pd.read_csv('../files/stock_list_filter.csv', dtype={'symbol': str})
-    for i,v in df.iterrows():
-        print(v['ts_code'])
-        v = ts.pro_bar(ts_code=v['ts_code'], adj='qfq', start_date='20250217', end_date='20250217')
-        if not v.empty:  # 检查返回的 DataFrame 是否为空
-            v.to_sql(name='market', con=engine, if_exists='append', index=False)
-
+    pass
 
 

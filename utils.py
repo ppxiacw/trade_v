@@ -48,7 +48,7 @@ class StockAnalysis:
             print(f"没有找到 trade_date 为 {date_str} 的记录")
             return None
 
-    def get_today(self):
+    def get_today(self,replace=False):
         now = datetime.now()
         today_str = now.strftime('%Y-%m-%d')
         calendar = self.get_trade_calendar(today_str[:4])
@@ -58,11 +58,19 @@ class StockAnalysis:
         if index is not None and calendar.loc[index]['trade_status'] == '0':
             for i in reversed(range(0, index)):
                 if calendar.loc[i]['trade_status'] == '1':
-                    return calendar.loc[i]['trade_date']
+                    today_str = calendar.loc[i]['trade_date']
         elif index is not None:
-            return today_str
+            if replace:
+                return today_str.replace('-','')
+            else:
+                return today_str
         else:
             return None
+
+        if replace:
+            return today_str.replace('-', '')
+        else:
+            return today_str
 
     def find_stock_info(self, stock_code):
         # 如果 df 尚未加载，则加载它并保存为类属性

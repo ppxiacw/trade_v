@@ -21,9 +21,6 @@ for result in results:
 
 class NewHigh:
 
-
-
-
     def __init__(self):
         pass
 
