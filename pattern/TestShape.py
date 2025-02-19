@@ -6,8 +6,11 @@ from flask import send_file
 from  pattern.RedStar import RedStar
 from pattern.NewHigh import NewHigh
 from config.tushare_utils import IndexAnalysis
+from trade_schedule import AppendMarketData,UpdateFiles
 
 import os
+
+UpdateFiles.new_high_()
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -60,7 +63,7 @@ def find_bottom_line():
 
 
 def find_new_high():
-    codes = []
+    codes = ''
     for i in range(0, len(new_high_codes), batch_size):
         batch = new_high_codes[i:i + batch_size]
         # 关键点：直接传入当前批次的 ts_code 数组
@@ -68,5 +71,5 @@ def find_new_high():
         for quote in quotes:
             value = NewHigh.valid(quote)
             if value:
-                codes.append(quote.ts_code)
-    return str(codes)
+                codes= codes+(quote.ts_code+'<br>')
+    return codes

@@ -32,7 +32,7 @@ def append_market_data():
         print(f":processing {ts_code}")
 
         # 获取数据
-        data = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date=today, end_date=today)
+        data = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date='20240924', end_date=today)
 
         # 累积非空数据
         if not data.empty:
@@ -50,3 +50,5 @@ def append_market_data():
         print(f"successful {len(all_data)} records")
     else:
         print("insert nothing")
+
+# append_market_data()

@@ -4,7 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from pattern.TestShape import find_bottom_line, find_new_high
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from schedule import AppendMarketData,UpdateFiles
+from trade_schedule import AppendMarketData,UpdateFiles
 
 
 # 全局初始化调度器
