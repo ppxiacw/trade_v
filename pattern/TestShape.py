@@ -25,6 +25,9 @@ large_cap_stocks = pd.read_csv(f'{relative_path}/stock_list_filter.csv',dtype={'
 large_cap_stocks = large_cap_stocks[~large_cap_stocks['name'].str.contains('ST', na=False)]
 large_cap_stocks = large_cap_stocks['ts_code'].tolist()
 
+new_high_codes = pd.read_csv(f'{relative_path}/new_high.csv',dtype={'symbol':str})['TS_CODE'].tolist()
+
+
 arr = []
 batch_size = 20  # 每批处理10个代码
 
@@ -58,8 +61,8 @@ def find_bottom_line():
 
 def find_new_high():
     codes = []
-    for i in range(0, len(large_cap_stocks), batch_size):
-        batch = large_cap_stocks[i:i + batch_size]
+    for i in range(0, len(new_high_codes), batch_size):
+        batch = new_high_codes[i:i + batch_size]
         # 关键点：直接传入当前批次的 ts_code 数组
         quotes = IndexAnalysis.realtime_quote(','.join(f'{x}' for x in batch))
         for quote in quotes:

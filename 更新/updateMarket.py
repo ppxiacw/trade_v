@@ -1,61 +1,35 @@
-import datetime
-
+from config.tushare_utils import  IndexAnalysis
+from pattern.NewHigh import new_high
 import pandas as pd
-import numpy as np
-import adata
-import connection
-# import update
-now = datetime.datetime.now()
-# 格式化日期为 yyyy-mm-dd
-today = now.strftime('%Y-%m-%d')
-df = adata.stock.info.all_code()
-df['stock_code'] = df['stock_code'].astype(str)
+import os
+from  utils import StockAnalysis
+current_path = os.path.abspath(__file__)
 
-# 假设 df 是你的股票代码列表 DataFrame
-all_data = []  # 创建一个空列表用于存储所有结果
-start_date = connection.select()
-for i, v in df.iterrows():
-    print(i)
-    # 获取特定股票的历史市场数据
-    value = adata.stock.market.get_market(
-        stock_code=v['stock_code'],
-        # start_date= str(start_date),
-        start_date= str(start_date),
-        end_date= today
-    )
+# 获取当前脚本的目录
+dir_path = os.path.dirname(current_path)
 
-    if not value.empty:  # 检查返回的 DataFrame 是否为空
-        all_data.append(value)
-    else:
-        print('===')
+# 获取当前脚本的上级目录
+parent_dir_path = os.path.dirname(dir_path)
 
-# 合并所有数据到一个 DataFrame 中
-if all_data:
-    final_df = pd.concat(all_data, ignore_index=True)
-else:
-    final_df = pd.DataFrame()
+# 构造相对路径
+relative_path = os.path.join(parent_dir_path, 'files')
 
+def new_high_():
+    analysis = StockAnalysis()
+    df = IndexAnalysis.stk_limit(analysis.get_today().replace('-',''))
 
-from sqlalchemy import create_engine
+    # 1. 将字典转换为Series便于映射
+    historical_high_series = pd.Series(new_high, name='historical_high')
 
-# MySQL连接信息
-db_config = {
-        "user":"root",
-        "password":"123456",
-        "host":"47.103.135.146",  # 或者你的服务器IP地址
-        "database":"trade"
-}
+    # 2. 将历史最高价合并到DataFrame
+    df['historical_high'] = df['TS_CODE'].map(historical_high_series)
 
-# 创建MySQL连接引擎
-engine = create_engine('mysql+mysqlconnector://{user}:{password}@{host}/{database}'.format(
-    **db_config))
+    # 3. 过滤出涨停价突破历史高点的股票
+    result_df = df[
+        (df['UP_LIMIT'] > df['historical_high']) &  # 涨停价突破历史高点
+        df['historical_high'].notna()  # 排除没有历史数据的股票
+        ]
 
+    result_df.to_csv(f'{relative_path}/new_high.csv')
 
-
-# 将DataFrame中的数据写入MySQL表
-table_name = 'market'  # 替换为你的表名
-# final_df = final_df.drop(columns=['Unnamed: 0'])
-
-final_df.to_sql(name=table_name, con=engine, if_exists='append', index=False)
-
-print(f"Data successfully imported into {table_name}")
+new_high_()

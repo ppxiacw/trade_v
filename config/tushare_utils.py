@@ -54,12 +54,16 @@ class IndexAnalysis:
 
     @staticmethod
     def realtime_quote(ts_code):
-        v:pd = ts.realtime_quote(ts_code=ts_code, src='dc')
+        v:pd = ts.realtime_quote(ts_code=ts_code)
         arr = []
         for item in v.iterrows():
             arr.append(RealTimeStockData.from_dataframe(item[1].to_frame().T))
         return arr
 
+    @staticmethod
+    def stk_limit(date):
+        df = pro.stk_limit(date)
+        return df
 
 
 
@@ -75,7 +79,6 @@ if __name__ == "__main__":
         v = ts.pro_bar(ts_code=v['ts_code'], adj='qfq', start_date='20250217', end_date='20250217')
         if not v.empty:  # 检查返回的 DataFrame 是否为空
             v.to_sql(name='market', con=engine, if_exists='append', index=False)
-
 
 
 

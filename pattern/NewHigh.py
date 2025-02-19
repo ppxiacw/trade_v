@@ -17,7 +17,6 @@ results = cursor.fetchall()
 
 for result in results:
     new_high[result[1]] = result[0]
-print(1)
 
 
 class NewHigh:
