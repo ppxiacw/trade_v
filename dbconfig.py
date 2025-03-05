@@ -4,7 +4,7 @@ import mysql.connector  # MySQL连接信息
 db_config = {
     "user": "root",
     "password": "123456",
-    "host": "47.103.135.146",  # 或者你的服务器IP地址
+    "host": "127.0.0.1",  # 或者你的服务器IP地址
     "database": "trade",
 
 }
@@ -16,7 +16,7 @@ engine = create_engine('mysql+mysqlconnector://{user}:{password}@{host}/{databas
 connection = mysql.connector.connect(
     user='root',
     password='123456',
-    host='47.103.135.146',  # 或者你的服务器IP地址
+    host='127.0.0.1',  # 或者你的服务器IP地址
     database='trade'
 )
 

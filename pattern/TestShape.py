@@ -63,7 +63,7 @@ def find_bottom_line():
 
 
 def find_new_high():
-    codes = ''
+    codes = set()
     for i in range(0, len(new_high_codes), batch_size):
         batch = new_high_codes[i:i + batch_size]
         # 关键点：直接传入当前批次的 ts_code 数组
@@ -71,5 +71,7 @@ def find_new_high():
         for quote in quotes:
             value = NewHigh.valid(quote)
             if value:
-                codes= codes+(quote.ts_code+'<br>')
+                codes.add(quote.ts_code)
     return codes
+
+find_bottom_line()
