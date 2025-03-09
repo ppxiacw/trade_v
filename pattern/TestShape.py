@@ -7,8 +7,9 @@ from  pattern.RedStar import RedStar
 from pattern.NewHigh import NewHigh
 from config.tushare_utils import IndexAnalysis
 from trade_schedule import AppendMarketData,UpdateFiles
-
+from pattern.FindShrinkage import FindShrinkage
 import os
+from datetime import datetime
 
 UpdateFiles.new_high_()
 
@@ -33,6 +34,11 @@ new_high_codes = pd.read_csv(f'{relative_path}/new_high.csv',dtype={'symbol':str
 
 arr = []
 batch_size = 20  # 每批处理10个代码
+# 获取当前日期和时间
+current_datetime = datetime.now()
+
+# 格式化日期和时间为 'yy-mm' 格式
+today = current_datetime.strftime('%Y-%m')
 
 
 def find_bottom_line():
@@ -46,20 +52,20 @@ def find_bottom_line():
             if value:
                 v = {
                     "ts_code": quote.ts_code,
-                    "bottom_line":value
+                    "score":value
                 }
                 arr.append(v)
-    sorted_data = sorted(arr, key=lambda x: x['bottom_line'], reverse=True)
+    sorted_data = sorted(arr, key=lambda x: x['score'], reverse=True)
     ts_codes = [d['ts_code'] for d in sorted_data]
     data_str = '\n'.join(ts_codes)
     # 将列表转换为字符串
-
+    fileName = f'{today}下影线.txt'
     # 将字符串写入文件
-    with open('codes.txt', 'w') as f:
+    with open(fileName, 'w') as f:
         f.write(data_str)
 
     # 返回文件
-    return send_file('codes.txt', as_attachment=True)
+    return send_file(fileName, as_attachment=True)
 
 
 def find_new_high():
@@ -74,4 +80,34 @@ def find_new_high():
                 codes.add(quote.ts_code)
     return codes
 
-find_bottom_line()
+
+def find_shrinkage():
+    # 存储股票代码与 valid 返回值的映射关系
+    code_value_map = {}
+
+    for i in range(0, len(large_cap_stocks), batch_size):
+        batch = large_cap_stocks[i:i + batch_size]
+        quotes = IndexAnalysis.realtime_quote(','.join(str(x) for x in batch))
+
+        for quote in quotes:
+            value = FindShrinkage.valid(quote)  # 调用 valid 方法获取返回值
+            if value is not None:  # 仅处理有效值
+                ts_code = quote.ts_code
+                # 如果代码已存在，保留较大的值（可根据需求调整逻辑）
+                if ts_code not in code_value_map or value > code_value_map[ts_code]:
+                    code_value_map[ts_code] = value
+
+    # 按 valid 返回值降序排序，返回股票代码列表
+    sorted_codes = sorted(
+        code_value_map.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    fileName = f'{today}缩量.txt'
+
+    arr =  [ts_code+'\n' for ts_code, _ in sorted_codes]
+    with open(fileName,'w',encoding='utf-8')as f:
+        f.writelines(arr)
+    return send_file(fileName, as_attachment=True)
+
+# find_bottom_line()

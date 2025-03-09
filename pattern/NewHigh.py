@@ -1,11 +1,12 @@
 from dto.StockDataDay import StockDataDay
 from utils import StockAnalysis
-from dbconfig import  cursor
+from dbconfig import  db_pool
 
 analysis = StockAnalysis()
 
 yesterday = analysis.get_date_by_step(analysis.get_today(),-1)
-
+conn = db_pool.get_connection()
+cursor = conn.cursor()
 # 执行SQL查询
 query = f'select max(high),ts_code from market where trade_date <= "{yesterday}" group by ts_code ;'
 cursor.execute(query)

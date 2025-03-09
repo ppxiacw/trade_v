@@ -59,6 +59,7 @@ class StockAnalysis:
             for i in reversed(range(0, index)):
                 if calendar.loc[i]['trade_status'] == '1':
                     today_str = calendar.loc[i]['trade_date']
+                    break
         elif index is not None:
             if replace:
                 return today_str.replace('-','')
@@ -80,9 +81,7 @@ class StockAnalysis:
         # 使用已经加载的数据框进行查询
         return self.stock_info_df[self.stock_info_df['symbol'] == stock_code]
 
-
 # 使用类进行分析
 if __name__ == "__main__":
-    analysis = StockAnalysis()
-    # print(analysis.find_stock_info("000001"))
-    print(analysis.get_date_by_step('2025-01-09', 2))
+    an = StockAnalysis()
+    an.get_today()

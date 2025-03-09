@@ -46,5 +46,6 @@ class RealTimeStockData:
             close = row['PRICE'],
             high = row['HIGH'],
             low = row['LOW'],
-            amount = row['AMOUNT']
+            amount = row['AMOUNT'],
+            vol = row['VOLUME']
         )

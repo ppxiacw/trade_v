@@ -1,0 +1,36 @@
+WITH ranked_trades AS (
+    SELECT
+        ts_code,
+        trade_date,
+        vol,
+        ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY trade_date DESC) AS rn
+    FROM trade.market
+),
+latest_10_days AS (
+    SELECT
+        ts_code,
+        trade_date,
+        vol
+    FROM ranked_trades
+    WHERE rn <= 30
+),
+min_vol_per_stock AS (
+    SELECT
+        ts_code,
+        MIN(vol) AS min_vol
+    FROM latest_10_days
+    GROUP BY ts_code
+),
+today_trades AS (
+    SELECT
+        ts_code,
+        vol,
+        trade_date
+    FROM ranked_trades
+    WHERE rn = 1
+)
+SELECT t.ts_code
+FROM today_trades t
+JOIN min_vol_per_stock m ON t.ts_code = m.ts_code
+WHERE t.vol = m.min_vol
+AND t.trade_date = (SELECT MAX(trade_date) FROM trade.market);

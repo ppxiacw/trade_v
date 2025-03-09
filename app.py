@@ -1,7 +1,7 @@
 import logging
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
-from pattern.TestShape import find_bottom_line, find_new_high
+from pattern.TestShape import find_bottom_line, find_new_high,find_shrinkage
 from apscheduler.triggers.cron import CronTrigger
 from trade_schedule import AppendMarketData, UpdateFiles
 from config.send_dingding import  send_dingtalk_message
@@ -10,6 +10,7 @@ from config.send_dingding import  send_dingtalk_message
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
 
 stored_new_high_codes = set()
+stored_shrinkage_codes = set()
 
 def create_app():
     app = Flask(__name__)
@@ -33,11 +34,25 @@ def create_app():
             app.logger.info("没有发现新的股票代码")
         return str(new_stocks)
 
+
+    @app.route('/find_shrinkage')
+    def find_shrinkage_route():
+        app.logger.info("开始执行 find_shrinkage")
+        # new_stocks = current_stocks - stored_new_high_codes
+        # if new_stocks:
+        #     app.logger.info(f"发现新的股票代码: {new_stocks}")
+        #     stored_shrinkage_codes.update(new_stocks)
+        #     send_dingtalk_message(list(new_stocks))
+        # else:
+        #     app.logger.info("没有发现新的股票代码")
+        return find_shrinkage()
+
+
     # 初始化调度器（仅在应用上下文中执行一次）
     with app.app_context():
         if not scheduler.running:
             # 初始化调度器（设置中国时区）
-            scheduler.add_job(find_new_high_route, 'interval', seconds=30)
+            # scheduler.add_job(find_new_high_route, 'interval', seconds=30)
 
             scheduler.add_job(
                 schedule_flushFile,

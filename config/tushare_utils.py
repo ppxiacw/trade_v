@@ -69,6 +69,7 @@ class IndexAnalysis:
 
 # 使用类进行分析
 if __name__ == "__main__":
-    pass
+    v: pd = IndexAnalysis.realtime_quote(ts_code='000001.SZ')
+
 
 
