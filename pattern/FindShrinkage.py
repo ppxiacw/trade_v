@@ -10,7 +10,7 @@ analysis = StockAnalysis()
 yesterday = analysis.get_date_by_step(analysis.get_today(),-1)
 
 # 执行SQL查询
-query = f'select vol,ts_code from market where trade_date = "{yesterday}";'
+query = f'select vol,ts_code from market where trade_date = "{yesterday}" and close-market.open<0;'
 cursor.execute(query)
 
 shrinkage_dict = dict()
