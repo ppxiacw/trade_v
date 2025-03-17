@@ -30,7 +30,7 @@ class FindShrinkage:
     @staticmethod
     def valid(df: StockDataDay):
         print(df.ts_code)
-        vol = df.vol/100
+        vol = df.vol
         if vol == 0:
            return None
         if vol<shrinkage_dict.get(df.ts_code,0) and df.close > df.open:

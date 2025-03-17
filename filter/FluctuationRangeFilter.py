@@ -45,7 +45,7 @@ new_high = dict()
 
 # 获取查询结果
 results = cursor.fetchall()
-redSet = {item[0] for item in results}
+redSet = {item['ts_code'] for item in results}
 
 
 

@@ -47,5 +47,5 @@ class RealTimeStockData:
             high = row['HIGH'],
             low = row['LOW'],
             amount = row['AMOUNT'],
-            vol = row['VOLUME']
+            vol = row['VOLUME']/100
         )

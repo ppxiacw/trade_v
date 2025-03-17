@@ -8,8 +8,10 @@ from pattern.NewHigh import NewHigh
 from config.tushare_utils import IndexAnalysis
 from trade_schedule import AppendMarketData,UpdateFiles
 from pattern.FindShrinkage import FindShrinkage
+from pattern.ShirnkageAfter import ShirnkageAfter
 import os
 from datetime import datetime
+from ShrinkageByDate import ShrinkageByDate
 
 UpdateFiles.new_high_()
 
@@ -92,10 +94,7 @@ def find_shrinkage():
         for quote in quotes:
             value = FindShrinkage.valid(quote)  # 调用 valid 方法获取返回值
             if value is not None:  # 仅处理有效值
-                ts_code = quote.ts_code
-                # 如果代码已存在，保留较大的值（可根据需求调整逻辑）
-                if ts_code not in code_value_map or value > code_value_map[ts_code]:
-                    code_value_map[ts_code] = value
+                code_value_map[quote.ts_code] = value
 
     # 按 valid 返回值降序排序，返回股票代码列表
     sorted_codes = sorted(
@@ -110,4 +109,62 @@ def find_shrinkage():
         f.writelines(arr)
     return send_file(fileName, as_attachment=True)
 
+
+def find_shirnkage_after():
+    # 存储股票代码与 valid 返回值的映射关系
+    code_value_map = {}
+
+    for i in range(0, len(large_cap_stocks), batch_size):
+        batch = large_cap_stocks[i:i + batch_size]
+        quotes = IndexAnalysis.realtime_quote(','.join(str(x) for x in batch))
+
+        for quote in quotes:
+            value = ShirnkageAfter.valid(quote)  # 调用 valid 方法获取返回值
+            if value is not None:  # 仅处理有效值
+                code_value_map[quote.ts_code] = value
+
+
+    # 按 valid 返回值降序排序，返回股票代码列表
+    sorted_codes = sorted(
+        code_value_map.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    fileName = f'{today}缩量盘后.txt'
+
+    arr =  [ts_code+'\n' for ts_code, _ in sorted_codes]
+    with open(fileName,'w',encoding='utf-8')as f:
+        f.writelines(arr)
+    return send_file(fileName, as_attachment=True)
+
+
+def find_shirnkage_by_date_after():
+    # 存储股票代码与 valid 返回值的映射关系
+    code_value_map = {}
+
+    for i in range(0, len(large_cap_stocks), batch_size):
+        batch = large_cap_stocks[i:i + batch_size]
+        quotes = IndexAnalysis.realtime_quote(','.join(str(x) for x in batch))
+
+        for quote in quotes:
+            value = ShrinkageByDate.find_distance(quote)  # 调用 valid 方法获取返回值
+            if value is not None:  # 仅处理有效值
+                code_value_map[quote.ts_code] = value
+            print(f'{quote.ts_code}+{value}')
+
+
+    # 按 valid 返回值降序排序，返回股票代码列表
+    sorted_codes = sorted(
+        code_value_map.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    fileName = f'{today}缩量盘后根据日期.txt'
+
+    arr =  [ts_code+str(code_value_map[ts_code])+'\n' for ts_code, _ in sorted_codes]
+    with open(fileName,'w',encoding='utf-8')as f:
+        f.writelines(arr)
+    # return send_file(fileName, as_attachment=True)
+
 # find_bottom_line()
+find_shirnkage_by_date_after()

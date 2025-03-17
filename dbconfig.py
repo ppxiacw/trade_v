@@ -21,7 +21,7 @@ connection = mysql.connector.connect(
 )
 
 # 创建游标对象
-cursor = connection.cursor()
+cursor = connection.cursor(dictionary=True)  # 添加 dictionary=True 参数
 
 
 
@@ -30,7 +30,7 @@ from mysql.connector import pooling
 # 全局连接池配置
 db_pool = pooling.MySQLConnectionPool(
     pool_name="flask_pool",
-    pool_size=5,
+    pool_size=10,
     host='47.103.135.146',
     user='root',
     password='123456',

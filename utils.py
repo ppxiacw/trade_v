@@ -37,7 +37,7 @@ class StockAnalysis:
                     row = calendar.iloc[i]
                     if row['trade_status'] == '1':
                         selected_rows.append(row)
-                        if len(selected_rows) >= abs(n-1):
+                        if len(selected_rows) >= abs(n - 1):
                             break
                 result_df = pd.DataFrame(selected_rows)['trade_date']
                 return result_df.iloc[-1]
@@ -48,7 +48,7 @@ class StockAnalysis:
             print(f"没有找到 trade_date 为 {date_str} 的记录")
             return None
 
-    def get_today(self,replace=False):
+    def get_today(self, replace=False):
         now = datetime.now()
         today_str = now.strftime('%Y-%m-%d')
         calendar = self.get_trade_calendar(today_str[:4])
@@ -62,7 +62,7 @@ class StockAnalysis:
                     break
         elif index is not None:
             if replace:
-                return today_str.replace('-','')
+                return today_str.replace('-', '')
             else:
                 return today_str
         else:
@@ -76,12 +76,17 @@ class StockAnalysis:
     def find_stock_info(self, stock_code):
         # 如果 df 尚未加载，则加载它并保存为类属性
         if self.stock_info_df is None:
-            self.stock_info_df = pd.read_csv("C:/Users/曹威/PycharmProjects/pythonProject/files/stock_list.csv",dtype={'symbol':str})
+            self.stock_info_df = pd.read_csv("C:/Users/曹威/PycharmProjects/pythonProject/files/stock_list.csv",
+                                             dtype={'symbol': str})
 
         # 使用已经加载的数据框进行查询
         return self.stock_info_df[self.stock_info_df['symbol'] == stock_code]
 
+
+stockAnalysis = StockAnalysis()
+
 # 使用类进行分析
 if __name__ == "__main__":
     an = StockAnalysis()
-    an.get_today()
+    a = an.get_trade_calendar()
+    print(1)
