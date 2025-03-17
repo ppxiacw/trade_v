@@ -11,7 +11,7 @@ from pattern.FindShrinkage import FindShrinkage
 from pattern.ShirnkageAfter import ShirnkageAfter
 import os
 from datetime import datetime
-from ShrinkageByDate import ShrinkageByDate
+from pattern.ShrinkageByDate import ShrinkageByDate
 
 UpdateFiles.new_high_()
 
