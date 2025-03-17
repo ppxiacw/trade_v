@@ -35,7 +35,7 @@ class StockAnalysis:
             elif n < 0:
                 for i in range(start_index, -1, -1):
                     row = calendar.iloc[i]
-                    if row['trade_status'] == '1':
+                    if str(row['trade_status']) == '1':
                         selected_rows.append(row)
                         if len(selected_rows) >= abs(n - 1):
                             break

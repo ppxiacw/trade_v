@@ -110,4 +110,4 @@ class ShirnkageAfter:
 
 
 
-print(ShirnkageAfter.valid(IndexAnalysis.get_stock_daily('000002.SZ', '20250313')[0]))
+# print(ShirnkageAfter.valid(IndexAnalysis.get_stock_daily('000002.SZ', '20250313')[0]))
