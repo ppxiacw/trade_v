@@ -3,6 +3,7 @@ from dto.StockDataDay import StockDataDay
 from config.tushare_utils import IndexAnalysis
 from collections import defaultdict
 from TradingDayCalculator import calculator
+from filter.OneFilter import OneFilter
 from utils import stockAnalysis
 class ShrinkageByDate:
     # 类属性存储所有股票的历史数据

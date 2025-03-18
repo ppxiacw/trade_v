@@ -12,6 +12,7 @@ from pattern.ShirnkageAfter import ShirnkageAfter
 import os
 from datetime import datetime
 from pattern.ShrinkageByDate import ShrinkageByDate
+from filter.OneFilter import OneFilter
 
 UpdateFiles.new_high_()
 
@@ -147,6 +148,8 @@ def find_shirnkage_by_date_after():
         quotes = IndexAnalysis.realtime_quote(','.join(str(x) for x in batch))
 
         for quote in quotes:
+            if not OneFilter.valid(quote):
+                continue
             value = ShrinkageByDate.find_distance(quote)  # 调用 valid 方法获取返回值
             if value is not None:  # 仅处理有效值
                 code_value_map[quote.ts_code] = value
