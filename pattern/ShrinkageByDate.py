@@ -32,7 +32,6 @@ class ShrinkageByDate:
                 for row in results:
                     code = row['ts_code']
                     cls._stock_data[code].append({
-                        'trade_time': row['trade_time'],
                         'trade_date': row['trade_date'].strftime('%Y-%m-%d'),
                         'open': row['open'],
                         'close': row['close'],
@@ -42,7 +41,7 @@ class ShrinkageByDate:
                         'amount': row['amount'],
                         'pct_chg': row['pct_chg'],
                         'change': row['change'],
-                        'turnover_ratio': row['turnover_ratio'],
+                        'turnover_ratio': row['turnover_rate'],
                         'pre_close': row['pre_close']
                     })
         finally:

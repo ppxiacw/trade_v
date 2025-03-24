@@ -41,7 +41,7 @@ batch_size = 20  # 每批处理10个代码
 current_datetime = datetime.now()
 
 # 格式化日期和时间为 'yy-mm' 格式
-today = current_datetime.strftime('%Y-%m')
+today = current_datetime.strftime('%Y-%m-%d')
 
 
 def find_bottom_line():
@@ -170,4 +170,5 @@ def find_shirnkage_by_date_after():
     # return send_file(fileName, as_attachment=True)
 
 # find_bottom_line()
-find_shirnkage_by_date_after()
+if __name__ == "__main__":
+    find_shirnkage_by_date_after()
