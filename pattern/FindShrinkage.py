@@ -1,7 +1,11 @@
+from config.tushare_utils import IndexAnalysis
 from dto.StockDataDay import StockDataDay
 from utils import StockAnalysis
 from dbconfig import  db_pool
-
+from filter.ContinuousRedFilter import ContinuousRedFilter
+from filter.FluctuationRangeFilter import FluctuationRangeFilter
+from filter.IntervalRangeFilter import IntervalRangeFilter
+from filter.TurnoverRateFilter import TurnoverRateFilter
 conn = db_pool.get_connection()
 cursor = conn.cursor()
 
@@ -29,9 +33,23 @@ class FindShrinkage:
 
     @staticmethod
     def valid(df: StockDataDay):
-        print(df.ts_code)
+        if not ContinuousRedFilter.valid(df):
+            print(f'{df.ts_code}被三红过滤')
+            return None
+        if not FluctuationRangeFilter.valid(df):
+            print(f'{df.ts_code}被涨跌幅度2以上过滤')
+            return None
+        if not IntervalRangeFilter.valid(df):
+            print(f'{df.ts_code}被十天波动波动小于5过滤或者和昨日差距小于0.5过滤')
+            return None
+        if not TurnoverRateFilter.valid(df):
+            print(f'{df.ts_code}被换手率要求过滤')
+            return None
         vol = df.vol
         if vol == 0:
            return None
         if vol<shrinkage_dict.get(df.ts_code,0) and df.close > df.open:
             return shrinkage_dict[df.ts_code]/vol
+
+
+print(FindShrinkage.valid(IndexAnalysis.get_stock_daily('000151.SZ','20250326')[0]))

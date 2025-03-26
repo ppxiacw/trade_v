@@ -1,12 +1,14 @@
 from config.tushare_utils import pro
 import pandas as pd
 from pathlib import Path
+from datetime import datetime  # 正确导入 datetime 类
+current_datetime = datetime.now()
+
+# 格式化日期和时间为 'yy-mm' 格式
+today = current_datetime.strftime('%Y%m%d')
 try:
     # 获取数据
-    df = pro.top_list(trade_date='20250324')
-
-
-
+    df = pro.top_list(trade_date=today)
 
     # 方案2：更兼容的写法（适用于所有Pandas版本）
     with open('stock_codes_alt.txt', 'w', encoding='utf-8') as f:

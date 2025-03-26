@@ -4,9 +4,8 @@ import pandas as pd
 from flask import send_file
 
 from  pattern.RedStar import RedStar
-from pattern.NewHigh import NewHigh
 from config.tushare_utils import IndexAnalysis
-from trade_schedule import AppendMarketData,UpdateFiles
+from trade_schedule import AppendMarketData
 from pattern.FindShrinkage import FindShrinkage
 from pattern.ShirnkageAfter import ShirnkageAfter
 import os
@@ -14,7 +13,6 @@ from datetime import datetime
 from pattern.ShrinkageByDate import ShrinkageByDate
 from filter.OneFilter import OneFilter
 
-UpdateFiles.new_high_()
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -70,18 +68,6 @@ def find_bottom_line():
     # 返回文件
     return send_file(fileName, as_attachment=True)
 
-
-def find_new_high():
-    codes = set()
-    for i in range(0, len(new_high_codes), batch_size):
-        batch = new_high_codes[i:i + batch_size]
-        # 关键点：直接传入当前批次的 ts_code 数组
-        quotes = IndexAnalysis.realtime_quote(','.join(f'{x}' for x in batch))
-        for quote in quotes:
-            value = NewHigh.valid(quote)
-            if value:
-                codes.add(quote.ts_code)
-    return codes
 
 
 def find_shrinkage():

@@ -3,6 +3,8 @@ from dto.StockDataDay import StockDataDay
 from filter.ContinuousRedFilter import ContinuousRedFilter
 from filter.FluctuationRangeFilter import FluctuationRangeFilter
 from filter.IntervalRangeFilter import IntervalRangeFilter
+from filter.TurnoverRateFilter import TurnoverRateFilter
+
 from TradingDayCalculator import calculator
 from utils import StockAnalysis
 from dbconfig import db_pool
@@ -92,6 +94,9 @@ class ShirnkageAfter:
 
         if not IntervalRangeFilter.valid(df):
             print(f'{df.ts_code}被十天波动过滤')
+            return None, None
+        if not TurnoverRateFilter.valid(df):
+            print(f'{df.ts_code}被换手率要求过滤')
             return None, None
 
         # 计算逻辑

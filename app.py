@@ -1,10 +1,9 @@
 import logging
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
-from pattern.TestShape import find_bottom_line, find_new_high,find_shrinkage,find_shirnkage_after
+from pattern.TestShape import find_bottom_line,find_shrinkage,find_shirnkage_after
 from apscheduler.triggers.cron import CronTrigger
-from trade_schedule import AppendMarketData, UpdateFiles
-from config.send_dingding import  send_dingtalk_message
+from trade_schedule import AppendMarketData
 
 # 全局初始化调度器
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
@@ -20,6 +19,7 @@ def create_app():
     @app.route('/find_bottom_line')
     def find_bottom_line_route():
         return find_bottom_line()
+
 
 
 

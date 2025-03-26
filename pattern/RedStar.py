@@ -5,6 +5,7 @@ from dbconfig import db_pool
 from filter.ContinuousRedFilter import ContinuousRedFilter
 from filter.FluctuationRangeFilter import FluctuationRangeFilter
 from filter.IntervalRangeFilter import IntervalRangeFilter
+from filter.TurnoverRateFilter import TurnoverRateFilter
 
 analysis = StockAnalysis()
 
@@ -43,6 +44,9 @@ class RedStar:
             if not IntervalRangeFilter.valid(df):
                 print(f'{df.ts_code}被十天波动波动小于5过滤或者和昨日差距小于0.5过滤')
                 return False
+            # if not TurnoverRateFilter.valid(df):
+            #     print(f'{df.ts_code}被换手率要求过滤')
+            #     return False
             open = df.open
             close = df.close
             low = df.low
@@ -77,5 +81,5 @@ class RedStar:
         except:
             return False
 
-
-# print(RedStar.valid(IndexAnalysis.get_stock_daily('605339', '20250307')[0]))
+if __name__ == "__main__":
+    print(RedStar.valid(IndexAnalysis.get_stock_daily('600361.SH','20250326')[0]))
