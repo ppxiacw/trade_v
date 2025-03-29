@@ -1,6 +1,8 @@
 from config.tushare_utils import pro
 import pandas as pd
 from pathlib import Path
+import os
+
 from datetime import datetime  # 正确导入 datetime 类
 current_datetime = datetime.now()
 
@@ -9,10 +11,17 @@ today = current_datetime.strftime('%Y%m%d')
 try:
     # 获取数据
     df = pro.top_list(trade_date=today)
+    df = df[df['ts_code'].astype(str).str.startswith(('60', '00'))]
 
     # 方案2：更兼容的写法（适用于所有Pandas版本）
-    with open('stock_codes_alt.txt', 'w', encoding='utf-8') as f:
-        f.write('\n'.join(df['ts_code'].astype(str)) + '\n')  # 确保最后也有换行
+
+    output_dir = 'top_list_files'  # 当前目录下的文件夹
+    os.makedirs(output_dir, exist_ok=True)
+
+    file_path = os.path.join(output_dir, f'{today}.txt')
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(df['ts_code'].astype(str)))
 
     print("股票代码已成功导出到output目录")
 

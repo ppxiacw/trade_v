@@ -30,7 +30,6 @@ large_cap_stocks = pd.read_csv(f'{relative_path}/stock_list_filter.csv',dtype={'
 large_cap_stocks = large_cap_stocks[~large_cap_stocks['name'].str.contains('ST', na=False)]
 large_cap_stocks = large_cap_stocks['ts_code'].tolist()
 
-new_high_codes = pd.read_csv(f'{relative_path}/new_high.csv',dtype={'symbol':str})['TS_CODE'].tolist()
 
 
 arr = []
