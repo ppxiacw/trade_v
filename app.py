@@ -38,10 +38,23 @@ def create_app():
     with app.app_context():
         if not scheduler.running:
             # 添加每天16:00执行的任务
+            # scheduler.add_job(
+            #     schedule_append_market_data,
+            #     trigger='interval',
+            #     minutes=2,
+            #     id="daily_4pm_schedule_append_market_data"
+            # )
             scheduler.add_job(
-                schedule_append_market_data,
-                trigger=CronTrigger(hour=16, minute=36),
-                id="daily_4pm_schedule_append_market_data"
+                find_shrinkage_route,
+                trigger='interval',
+                minutes=2,
+                id="find_shrinkage_route"
+            )
+            scheduler.add_job(
+                find_bottom_line_route,
+                trigger='interval',
+                minutes=2,
+                id="find_bottom_line_route"
             )
 
             scheduler.start()
@@ -58,3 +71,4 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=True)
+

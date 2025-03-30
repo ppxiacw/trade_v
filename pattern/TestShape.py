@@ -32,7 +32,6 @@ large_cap_stocks = large_cap_stocks['ts_code'].tolist()
 
 
 
-arr = []
 batch_size = 20  # 每批处理10个代码
 # 获取当前日期和时间
 current_datetime = datetime.now()
@@ -42,6 +41,8 @@ today = current_datetime.strftime('%Y-%m-%d')
 
 
 def find_bottom_line():
+    arr = []
+
     # 分批次调用接口
     for i in range(0, len(large_cap_stocks), batch_size):
         batch = large_cap_stocks[i:i + batch_size]
@@ -59,13 +60,12 @@ def find_bottom_line():
     ts_codes = [d['ts_code'] for d in sorted_data]
     data_str = '\n'.join(ts_codes)
     # 将列表转换为字符串
-    fileName = f'{today}下影线.txt'
+    fileName = f'my_files/bottom_line_files/{today}下影线.txt'
     # 将字符串写入文件
     with open(fileName, 'w') as f:
         f.write(data_str)
 
     # 返回文件
-    return send_file(fileName, as_attachment=True)
 
 
 
@@ -88,12 +88,11 @@ def find_shrinkage():
         key=lambda x: x[1],
         reverse=True
     )
-    fileName = f'{today}缩量.txt'
+    fileName = f'my_files/shrinkage_files/{today}缩量.txt'
 
     arr =  [ts_code+'\n' for ts_code, _ in sorted_codes]
     with open(fileName,'w',encoding='utf-8')as f:
         f.writelines(arr)
-    return send_file(fileName, as_attachment=True)
 
 
 def find_shirnkage_after():
@@ -116,12 +115,11 @@ def find_shirnkage_after():
         key=lambda x: x[1],
         reverse=True
     )
-    fileName = f'{today}缩量盘后.txt'
+    fileName = f'my_files/shrinkage_files/{today}缩量盘后.txt'
 
     arr =  [ts_code+'\n' for ts_code, _ in sorted_codes]
     with open(fileName,'w',encoding='utf-8')as f:
         f.writelines(arr)
-    return send_file(fileName, as_attachment=True)
 
 
 def find_shirnkage_by_date_after():
@@ -147,7 +145,7 @@ def find_shirnkage_by_date_after():
         key=lambda x: x[1],
         reverse=True
     )
-    fileName = f'{today}缩量盘后根据日期.txt'
+    fileName = f'my_files/shrinkage_files/{today}缩量盘后根据日期.txt'
 
     arr =  [ts_code+str(code_value_map[ts_code])+'\n' for ts_code, _ in sorted_codes]
     with open(fileName,'w',encoding='utf-8')as f:
