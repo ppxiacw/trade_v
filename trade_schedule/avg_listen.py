@@ -16,20 +16,27 @@ from value.value import today, today_
 from TopList import export_top_list
 
 start_date = stockAnalysis.get_date_by_step(today_,-60)
+with open('./top_list_files/all_stocks.txt', 'r', encoding='utf-8') as f:
+    # 使用集合推导式 + 去除换行符 + 过滤空行
+    all_stocks = {line.strip() for line in f if line.strip()}
+with open('./top_list_files/black_list.txt', 'r', encoding='utf-8') as f:
+    # 使用集合推导式 + 去除换行符 + 过滤空行
+    black_list = {line.strip() for line in f if line.strip()}
+all_stocks = list(all_stocks - black_list)
 
 class EnhancedStockMonitor:
     def __init__(self):
         # 基础配置
         self.ma_levels = [20,30, 60]
         self.batch_size = 20
-
+        self.ma_data = dict()
 
 
         # 状态管理
         self.sent_alerts: Set[str] = set()  # 用于去重
         self.alert_cooldown = timedelta(minutes=30)  # 相同警报冷却时间
         self.last_alert_time: Dict[str, datetime] = {}  # 各股票最后警报时间
-
+        self.fetch_ma_data()
 
 
     def _send_dingtalk_alert(self, content: str):
@@ -151,27 +158,32 @@ class EnhancedStockMonitor:
         return below, near
 
 
-    def fetch_ma_data(self, ts_code: str) -> Dict:
-        """获取最新的均线数据"""
-        try:
-            df = ts.pro_bar(
-                ts_code=ts_code,
-                adj='qfq',
-                ma=self.ma_levels,
-                start_date=start_date,
-                end_date=today
-            )
+    def fetch_ma_data(self) -> Dict:
 
-            if df.empty or len(df) < max(self.ma_levels):
+        """获取最新的均线数据"""
+
+        for ts_code in all_stocks:
+            print(ts_code)
+            try:
+                df = ts.pro_bar(
+                    ts_code=ts_code,
+                    adj='qfq',
+                    ma=self.ma_levels,
+                    start_date=start_date,
+                    end_date=today
+                )
+
+                if df.empty or len(df) < max(self.ma_levels):
+                    self.ma_data[ts_code]= {}
+
+                df['trade_date'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+                latest = df.sort_values('trade_date').iloc[-1]
+
+                self.ma_data[ts_code]= {f'ma{period}': latest[f'ma{period}'] for period in self.ma_levels}
+            except Exception as e:
+                print(f"获取 {ts_code} 均线数据异常: {str(e)}")
                 return {}
 
-            df['trade_date'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
-            latest = df.sort_values('trade_date').iloc[-1]
-
-            return {f'ma{period}': latest[f'ma{period}'] for period in self.ma_levels}
-        except Exception as e:
-            print(f"获取 {ts_code} 均线数据异常: {str(e)}")
-            return {}
     def process_batch(self, batch: List[str]):
         """处理一批股票"""
         quotes: List[StockDataDay] = IndexAnalysis.realtime_quote(','.join(batch))
@@ -183,7 +195,7 @@ class EnhancedStockMonitor:
                 continue
 
             # 获取均线数据
-            ma_data = self.fetch_ma_data(code)
+            ma_data = self.ma_data.get(code)
             if not ma_data:
                 continue
 
@@ -191,8 +203,6 @@ class EnhancedStockMonitor:
             hierarchy = self.get_ma_hierarchy(ma_data)
             if not hierarchy:
                 continue
-
-            # 检查跌破情况
 
 
             # 在策略逻辑中
@@ -209,15 +219,10 @@ class EnhancedStockMonitor:
                     nearby=nearby_mas  # 新增接近列表
                 )
 
+
     def run_forever(self, interval: int = 300):
         """持续运行监控"""
-        with open('./top_list_files/all_stocks.txt', 'r', encoding='utf-8') as f:
-            # 使用集合推导式 + 去除换行符 + 过滤空行
-            all_stocks = {line.strip() for line in f if line.strip()}
-        with open('./top_list_files/black_list.txt', 'r', encoding='utf-8') as f:
-            # 使用集合推导式 + 去除换行符 + 过滤空行
-            black_list = {line.strip() for line in f if line.strip()}
-        all_stocks = list(all_stocks-black_list)
+
 
         while True:
             start_time = datetime.now()
