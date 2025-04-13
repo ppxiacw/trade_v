@@ -69,7 +69,8 @@ class IndexAnalysis:
 
 # 使用类进行分析
 if __name__ == "__main__":
-    v: pd = IndexAnalysis.realtime_quote(ts_code='000001.SZ')
+    df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='202500303', end_date='20250410')
+    print(df)
 
 
 
