@@ -27,7 +27,7 @@ all_stocks = list(all_stocks - black_list)
 class EnhancedStockMonitor:
     def __init__(self):
         # 基础配置
-        self.ma_levels = [20,30, 60]
+        self.ma_levels = [5,10,20,30, 60]
         self.batch_size = 20
         self.ma_data = dict()
 

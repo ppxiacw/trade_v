@@ -73,15 +73,6 @@ class StockAnalysis:
         else:
             return today_str
 
-    def find_stock_info(self, stock_code):
-        # 如果 df 尚未加载，则加载它并保存为类属性
-        if self.stock_info_df is None:
-            self.stock_info_df = pd.read_csv("C:/Users/曹威/PycharmProjects/pythonProject/files/stock_list.csv",
-                                             dtype={'symbol': str})
-
-        # 使用已经加载的数据框进行查询
-        return self.stock_info_df[self.stock_info_df['symbol'] == stock_code]
-
 
 stockAnalysis = StockAnalysis()
 
