@@ -1,11 +1,10 @@
 from dto.StockDataDay import StockDataDay
-from dbconfig import db_pool
-
-conn = db_pool.get_connection()
-cursor = conn.cursor()
+from config.dbconfig import  exeQuery
+from config.Value import testDate
+from config.tushare_utils import IndexAnalysis
 
 # 执行SQL查询
-query = """
+query = f"""
 WITH recent_trades AS (
     SELECT 
         ts_code,
@@ -16,6 +15,7 @@ WITH recent_trades AS (
             ORDER BY trade_date DESC
         ) AS rn
     FROM trade.market
+    where trade_date <= {testDate}
 )
 SELECT ts_code
 FROM recent_trades
@@ -24,13 +24,12 @@ GROUP BY ts_code
 HAVING COUNT(*) = 3 
     AND SUM(close > open) = 3;
 """
-cursor.execute(query)
+results = exeQuery(query)
 
 new_high = dict()
 
 # 获取查询结果
-results = cursor.fetchall()
-redSet = {item[0] for item in results}
+redSet = {item['ts_code'] for item in results}
 
 
 class ContinuousRedFilter:
@@ -45,4 +44,7 @@ class ContinuousRedFilter:
         else:
             return True
 
-# print(Filter.valid(IndexAnalysis.get_stock_daily('000045','20250307')[0]))
+
+if __name__ == "__main__":
+
+    print(ContinuousRedFilter.valid(IndexAnalysis.get_stock_daily('000045','20250307')[0]))

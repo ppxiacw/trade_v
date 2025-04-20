@@ -3,23 +3,58 @@ import json
 
 webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
 
-def send_dingtalk_message( message):
-    headers = {
-        'Content-Type': 'application/json'
-    }
+
+def send_dingtalk_message(title, tsCode):
+    headers = {'Content-Type': 'application/json'}
+    image_url = generate_stock_image_url(tsCode)
 
     data = {
-        "msgtype": "text",
-        "text": {
-            "content": message
+        "msgtype": "actionCard",
+        "actionCard": {
+            "title": title,
+            "text": f"**股票代码**: {tsCode} \n\n ![走势缩略图]({image_url})",
+            "btns": [
+                {
+                    "title": "查看高清大图",
+                    "actionURL": image_url  # 点击按钮跳转浏览器打开
+                }
+            ],
+            "btnOrientation": "0"
         }
     }
 
-    response = requests.post(webhook_url, headers=headers, data=json.dumps(data))
+    response = requests.post(webhook_url, headers=headers, json=data)
 
     if response.status_code == 200:
         print("消息发送成功")
     else:
-        print(f"消息发送失败，状态码：{response.status_code}")
+        print(f"失败状态码：{response.status_code}")
+
+import re
 
 
+def generate_stock_image_url(stock_code: str) -> str:
+    """
+    生成新浪股票日线图 URL（支持 000001.SH 格式）
+
+    :param stock_code: 股票代码（格式如 000001.SH 或 300750.SZ）
+    :return: 图片 URL
+    :raises ValueError: 格式错误时抛出异常
+    """
+    # 格式校验（6位数字 + .SH/.SZ）
+    if not re.match(r'^\d{6}\.(SH|SZ)$', stock_code, re.IGNORECASE):
+        raise ValueError("股票代码格式错误，应为 6位数字 + .SH/.SZ，例如：000001.SH")
+
+    # 分割代码和交易所
+    code_part, exchange_part = stock_code.upper().split('.')
+
+    # 转换为新浪需要的格式（sh/sz + 代码）
+    sina_code = f"{exchange_part.lower()}{code_part}"
+
+    # 生成 URL
+    return f"http://image.sinajs.cn/newchart/daily/n/{sina_code}.png"
+
+
+
+
+# send_dingtalk_message('00001','http://image.sinajs.cn/newchart/daily/n/sh600000.png')

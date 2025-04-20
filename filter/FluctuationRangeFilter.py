@@ -1,8 +1,7 @@
 
 from dto.StockDataDay import StockDataDay
-from dbconfig import  cursor
-from config.tushare_utils import  IndexAnalysis
-
+from config.dbconfig import  exeQuery
+from config.tushare_utils import IndexAnalysis
 
 # 执行SQL查询
 query = """
@@ -39,12 +38,11 @@ WHERE
     violation_days = 0  -- 没有违规天数
     AND total_days = 20; --
 """
-cursor.execute(query)
+results=exeQuery(query)
 
 new_high = dict()
 
 # 获取查询结果
-results = cursor.fetchall()
 redSet = {item['ts_code'] for item in results}
 
 
@@ -62,4 +60,5 @@ class FluctuationRangeFilter:
             return True
 
 
-# print(FluctuationRangeFilter.valid(IndexAnalysis.get_stock_daily('000001.SZ','20250307')[0]))
+if __name__ == "__main__":
+    print(FluctuationRangeFilter.valid(IndexAnalysis.get_stock_daily('000001.SZ','20250307')[0]))

@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 from config.tushare_utils import ts
-from dbconfig import engine
+from config.dbconfig import engine
 from utils import StockAnalysis
 
 analysis = StockAnalysis()
@@ -32,7 +32,7 @@ def append_market_data():
         print(f":processing {ts_code}")
 
         # 获取数据
-        data = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date='20250412', end_date=today, factors=['tor'])
+        data = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date='20250416', end_date=today, factors=['tor'])
 
         # 累积非空数据
         if not data.empty:

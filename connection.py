@@ -1,5 +1,4 @@
-import mysql.connector
-from dbconfig import connection
+from config.dbconfig import connection
 # 创建连接
 
 

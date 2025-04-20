@@ -12,7 +12,7 @@ import os
 from datetime import datetime
 from pattern.ShrinkageByDate import ShrinkageByDate
 from filter.OneFilter import OneFilter
-
+from config.send_dingding import send_dingtalk_message
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -40,31 +40,44 @@ current_datetime = datetime.now()
 today = current_datetime.strftime('%Y%m%d')
 
 
-def find_bottom_line():
+def find_bottom_line(datestr=None):
     arr = []
-
+    if datestr == None:
     # 分批次调用接口
-    for i in range(0, len(large_cap_stocks), batch_size):
-        batch = large_cap_stocks[i:i + batch_size]
-        # 关键点：直接传入当前批次的 ts_code 数组
-        quotes = IndexAnalysis.realtime_quote(','.join(f'{x}' for x in batch))
-        for quote in quotes:
-            value = RedStar.valid(quote)
-            if value:
-                v = {
-                    "ts_code": quote.ts_code,
-                    "score":value
-                }
-                arr.append(v)
+        for i in range(0, len(large_cap_stocks), batch_size):
+            batch = large_cap_stocks[i:i + batch_size]
+            # 关键点：直接传入当前批次的 ts_code 数组
+            quotes = IndexAnalysis.realtime_quote(','.join(f'{x}' for x in batch))
+            for quote in quotes:
+                value = RedStar.valid(quote)
+                if value:
+                    v = {
+                        "ts_code": quote.ts_code,
+                        "score":value
+                    }
+                    arr.append(v)
+    else:
+        for i, ts_code in enumerate(large_cap_stocks):
+            v= IndexAnalysis.get_stock_daily(ts_code,datestr)
+            if v:
+                value = RedStar.valid(IndexAnalysis.get_stock_daily(ts_code,datestr)[0])
+                if value:
+                    v = {
+                        "ts_code":ts_code,
+                        "score": value
+                    }
+                    arr.append(v)
     sorted_data = sorted(arr, key=lambda x: x['score'], reverse=True)
     ts_codes = [d['ts_code'] for d in sorted_data]
     data_str = '\n'.join(ts_codes)
     # 将列表转换为字符串
-    fileName = f'my_files/bottom_line_files/{today}下影线.txt'
+    fileName = f'{relative_path}/my_files/bottom_line_files/{today}下影线.txt'
     # 将字符串写入文件
     with open(fileName, 'w') as f:
         f.write(data_str)
 
+    for sorted_code in sorted_data[:30]:
+        send_dingtalk_message("下影线提醒",sorted_code['ts_code'])
     # 返回文件
 
 
@@ -88,11 +101,16 @@ def find_shrinkage():
         key=lambda x: x[1],
         reverse=True
     )
-    fileName = f'my_files/shrinkage_files/{today}缩量.txt'
+    fileName = f'{relative_path}/my_files/shrinkage_files/{today}缩量.txt'
 
     arr =  [ts_code+'\n' for ts_code, _ in sorted_codes]
     with open(fileName,'w',encoding='utf-8')as f:
         f.writelines(arr)
+
+    for sorted_code in sorted_codes[:30]:
+        send_dingtalk_message("缩量提醒",sorted_code[0])
+
+
 
 
 def find_shirnkage_after():
@@ -145,7 +163,7 @@ def find_shirnkage_by_date_after():
         key=lambda x: x[1],
         reverse=True
     )
-    fileName = f'my_files/shrinkage_files/{today}缩量盘后根据日期.txt'
+    fileName = f'{relative_path}/my_files/{today}缩量盘后根据日期.txt'
 
     arr =  [ts_code+str(code_value_map[ts_code])+'\n' for ts_code, _ in sorted_codes]
     with open(fileName,'w',encoding='utf-8')as f:
@@ -155,4 +173,5 @@ def find_shirnkage_by_date_after():
 # find_bottom_line()
 if __name__ == "__main__":
     # find_shirnkage_by_date_after()
+    find_bottom_line()
     pass

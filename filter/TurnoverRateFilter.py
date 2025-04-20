@@ -1,6 +1,7 @@
 
 from dto.StockDataDay import StockDataDay
-from dbconfig import db_pool
+from config.dbconfig import db_pool
+from config.tushare_utils import IndexAnalysis
 
 conn = db_pool.get_connection()
 cursor = conn.cursor(dictionary=True)
@@ -45,5 +46,6 @@ class TurnoverRateFilter:
         else:
             return False
 
+if __name__ == "__main__":
 
-# print(TurnoverRateFilter.valid(IndexAnalysis.get_stock_daily('000004.SZ','20250326')[0]))
+    print(TurnoverRateFilter.valid(IndexAnalysis.get_stock_daily('000004.SZ','20250326')[0]))

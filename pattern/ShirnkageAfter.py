@@ -1,13 +1,11 @@
-from config.tushare_utils import IndexAnalysis
 from dto.StockDataDay import StockDataDay
 from filter.ContinuousRedFilter import ContinuousRedFilter
 from filter.FluctuationRangeFilter import FluctuationRangeFilter
 from filter.IntervalRangeFilter import IntervalRangeFilter
 from filter.TurnoverRateFilter import TurnoverRateFilter
 
-from TradingDayCalculator import calculator
 from utils import StockAnalysis
-from dbconfig import db_pool
+from config.dbconfig import db_pool
 from typing import Tuple, Optional
 from pattern.ShrinkageByDate import ShrinkageByDate
 conn = db_pool.get_connection()

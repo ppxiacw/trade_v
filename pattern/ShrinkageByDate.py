@@ -1,9 +1,8 @@
-from dbconfig import db_pool
+from config.dbconfig import db_pool
 from dto.StockDataDay import StockDataDay
 from config.tushare_utils import IndexAnalysis
 from collections import defaultdict
 from TradingDayCalculator import calculator
-from filter.OneFilter import OneFilter
 
 from utils import stockAnalysis
 class ShrinkageByDate:

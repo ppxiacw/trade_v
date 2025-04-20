@@ -1,7 +1,7 @@
 from config.tushare_utils import IndexAnalysis
 from dto.StockDataDay import StockDataDay
 from utils import StockAnalysis
-from dbconfig import  db_pool
+from config.dbconfig import  db_pool
 from filter.ContinuousRedFilter import ContinuousRedFilter
 from filter.FluctuationRangeFilter import FluctuationRangeFilter
 from filter.IntervalRangeFilter import IntervalRangeFilter
@@ -52,4 +52,4 @@ class FindShrinkage:
             return shrinkage_dict[df.ts_code]/vol
 
 
-print(FindShrinkage.valid(IndexAnalysis.get_stock_daily('000151.SZ','20250326')[0]))
+# print(FindShrinkage.valid(IndexAnalysis.get_stock_daily('000151.SZ','20250326')[0]))

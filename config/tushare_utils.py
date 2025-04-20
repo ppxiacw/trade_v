@@ -25,7 +25,7 @@ token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
 
-stock_list = pd.read_csv(f'{relative_path}/stock_list.csv',dtype={'symbol':str})
+stock_list = pd.read_csv(f'{relative_path}/stock_list_filter.csv',dtype={'symbol':str})
 class IndexAnalysis:
     def __init__(self):
         pass

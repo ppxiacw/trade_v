@@ -14,6 +14,7 @@ from config.tushare_utils import IndexAnalysis
 from utils import stockAnalysis
 from value.value import today, today_
 from TopList import export_top_list
+from config.send_dingding import send_dingtalk_message
 
 start_date = stockAnalysis.get_date_by_step(today_,-60)
 with open('./top_list_files/all_stocks.txt', 'r', encoding='utf-8') as f:
@@ -115,7 +116,8 @@ class EnhancedStockMonitor:
 
         # 发送警报
         if alert_content:
-            self._send_dingtalk_alert("\n".join(alert_content))
+            send_dingtalk_message("破均线提醒",ts_code)
+            # self._send_dingtalk_alert("\n".join(alert_content))
             self.sent_alerts.add(alert_id)
 
 

@@ -1,6 +1,6 @@
 from dto.StockDataDay import StockDataDay
 from config.tushare_utils import IndexAnalysis
-from dbconfig import db_pool
+from config.dbconfig import db_pool
 
 conn = db_pool.get_connection()
 
@@ -64,4 +64,7 @@ class IntervalRangeFilter:
         else:
             return True
 
-print(IntervalRangeFilter.valid(IndexAnalysis.get_stock_daily('000001.SZ','20250307')[0]))
+
+if __name__ == "__main__":
+
+    print(IntervalRangeFilter.valid(IndexAnalysis.get_stock_daily('000001.SZ','20250307')[0]))
