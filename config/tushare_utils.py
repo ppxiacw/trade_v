@@ -63,14 +63,25 @@ class IndexAnalysis:
     def stk_limit(date):
         df = pro.stk_limit(date)
         return df
-
+    @staticmethod
+    def stk_factor(ts_code,date):
+        df = pro.stk_factor(ts_code=ts_code, start_date=date, end_date=date,
+                            fields='ts_code,trade_date,rsi_6,rsi_12,rsi_24,kdj_j')
+        return df
 
 
 
 # 使用类进行分析
 if __name__ == "__main__":
-    df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='202500303', end_date='20250410')
+    # df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='20250509', end_date='20250410')
+    # 获取浦发银行60000.SH的历史分钟数据
+    df = pro.stk_mins(ts_code='600919.SH', freq='1min', start_date='2025-06-27 09:30:00',
+                      end_date='2025-06-27 09:40:00')
+    # 软件上显示的9.35带上了集合竞价 也就是9.30那一个值
+    df = pro.stk_auction(ts_code='600919.SH',trade_date='20250627',
+                         fields='ts_code, trade_date,vol,price,amount,turnover_rate,volume_ratio')
     print(df)
+
 
 
 

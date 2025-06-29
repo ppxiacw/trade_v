@@ -12,7 +12,8 @@ import os
 from datetime import datetime
 from pattern.ShrinkageByDate import ShrinkageByDate
 from filter.OneFilter import OneFilter
-from config.send_dingding import send_dingtalk_message
+from config.send_dingding import *
+import time
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -76,8 +77,8 @@ def find_bottom_line(datestr=None):
     with open(fileName, 'w') as f:
         f.write(data_str)
 
-    for sorted_code in sorted_data[:30]:
-        send_dingtalk_message("下影线提醒",sorted_code['ts_code'])
+    for sorted_code in sorted_data[:40]:
+        send_dingtalk_message("下影线提醒",sorted_code['ts_code'],bottom_line_webhook_url)
     # 返回文件
 
 
@@ -107,8 +108,8 @@ def find_shrinkage():
     with open(fileName,'w',encoding='utf-8')as f:
         f.writelines(arr)
 
-    for sorted_code in sorted_codes[:30]:
-        send_dingtalk_message("缩量提醒",sorted_code[0])
+    for sorted_code in sorted_codes[:40]:
+        send_dingtalk_message("缩量提醒",sorted_code[0],shrink_webhook_url)
 
 
 
@@ -170,8 +171,44 @@ def find_shirnkage_by_date_after():
         f.writelines(arr)
     # return send_file(fileName, as_attachment=True)
 
+
+
+
+def find_rsi():
+    call_count = 0  # 记录当前时间窗口内的调用次数
+    window_start = time.time()  # 时间窗口的起始时间
+
+    for ts_code in large_cap_stocks:
+        current_time = time.time()
+        elapsed_time = current_time - window_start
+
+        # 如果当前时间窗口已超过60秒，重置窗口和计数器
+        if elapsed_time >= 60:
+            call_count = 0
+            window_start = current_time
+        else:
+            # 如果当前窗口内调用次数已达上限，等待至下一个窗口
+            if call_count >= 70:
+                sleep_time = 60 - elapsed_time
+                time.sleep(sleep_time)
+                # 重置窗口和计数器
+                call_count = 0
+                window_start = time.time()
+
+        # 调用 API 并增加计数器
+        quotes = IndexAnalysis.stk_factor(ts_code, today)
+        call_count += 1
+        try:
+            # 处理 RSI 逻辑
+            rsi_6 = quotes['rsi_6'][0]
+            if rsi_6 < 30:
+                print(f'{ts_code},{rsi_6}')
+        except:
+            print(quotes)
+
+
 # find_bottom_line()
 if __name__ == "__main__":
     # find_shirnkage_by_date_after()
-    find_bottom_line()
+    find_rsi()
     pass

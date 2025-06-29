@@ -47,13 +47,13 @@ def create_app():
             scheduler.add_job(
                 find_shrinkage_route,
                 trigger='interval',
-                minutes=8,
+                minutes=5,
                 id="find_shrinkage_route"
             )
             scheduler.add_job(
                 find_bottom_line_route,
                 trigger='interval',
-                minutes=8,
+                minutes=5,
                 id="find_bottom_line_route"
             )
 

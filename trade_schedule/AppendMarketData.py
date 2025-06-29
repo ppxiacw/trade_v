@@ -32,7 +32,7 @@ def append_market_data():
         print(f":processing {ts_code}")
 
         # 获取数据
-        data = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date='20250416', end_date=today, factors=['tor'])
+        data = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date='20250501', end_date=today, factors=['tor'])
 
         # 累积非空数据
         if not data.empty:
