@@ -16,8 +16,8 @@ from value.value import today, today_
 from TopList import export_top_list
 from config.send_dingding import *
 
-start_date = stockAnalysis.get_date_by_step(today_,-60)
-with open('./top_list_files/all_stocks.txt', 'r', encoding='utf-8') as f:
+start_date = stockAnalysis.get_date_by_step(today_,-200).replace("-","")
+with open('./top_list_files/etf.txt', 'r', encoding='utf-8') as f:
     # 使用集合推导式 + 去除换行符 + 过滤空行
     all_stocks = {line.strip() for line in f if line.strip()}
 with open('./top_list_files/black_list.txt', 'r', encoding='utf-8') as f:
@@ -170,10 +170,14 @@ class EnhancedStockMonitor:
                 df = ts.pro_bar(
                     ts_code=ts_code,
                     adj='qfq',
+                    # asset='E',
+                    asset='I',
                     ma=self.ma_levels,
                     start_date=start_date,
                     end_date=today
                 )
+
+
 
                 if df.empty or len(df) < max(self.ma_levels):
                     self.ma_data[ts_code]= {}

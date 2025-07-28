@@ -3,8 +3,12 @@ import os
 import pandas as pd
 from config.tushare_utils import ts
 from config.dbconfig import engine
-from utils import StockAnalysis
 
+
+from utils import StockAnalysis
+token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
+ts.set_token(token)
+pro = ts.pro_api(token)
 analysis = StockAnalysis()
 today = analysis.get_today(replace=True)
 # 获取当前脚本的完整路径
@@ -51,5 +55,24 @@ def append_market_data():
     else:
         print("insert nothing")
 
+
+def append_market_mins_data(ts_code):
+    df = pro.stk_mins(ts_code=ts_code, freq='1min', start_date='2025-06-25 09:00:00',
+                      end_date='2025-07-28 19:00:00')
+    print(df)
+    df = pro.stk_mins(ts_code=ts_code, freq='5min', start_date='2025-06-25 09:00:00',
+                      end_date='2025-07-28 19:00:00')
+    print(df)
+    # if not df.empty:
+    #     df.to_sql(
+    #         name='market_mins',
+    #         con=engine,
+    #         if_exists='append',  # 保持追加模式
+    #         index=False,
+    #         chunksize=1000  # 分块写入，避免内存溢出
+    #     )
+    #     print(f"successful {len(df)} records")
+    # else:
+    #     print("insert nothing")
 if __name__ == "__main__":
-    append_market_data()
+    append_market_mins_data('000001.SH')

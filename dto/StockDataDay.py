@@ -2,8 +2,9 @@ import pandas as pd
 
 
 class StockDataDay:
-    def __init__(self, ts_code, open, high, low, close, pre_close, amount, trade_date=None, change=None, pct_chg=None, vol=None):
+    def __init__(self, ts_code,time, open, high, low, close, pre_close, amount, trade_date=None, change=None, pct_chg=None, vol=None):
         self.ts_code = ts_code  # 股票代码
+        self.time = time
         self.trade_date = trade_date  # 交易日期
         self.open = open  # 开盘价
         self.high = high  # 最高价
@@ -62,6 +63,7 @@ class StockDataDay:
         # 从 DataFrame 中提取数据并创建实例
         return StockDataDay(
             ts_code=df['stock_code'],
+            time=df['time'],
             trade_date=df['trade_date'],
             open=df['open'],
             high=df['high'],
@@ -91,6 +93,7 @@ class StockDataDay:
         row = df.iloc[0]
         return StockDataDay(
             ts_code=row['TS_CODE'],
+            time=row['TIME'],
             open=row['OPEN'],
             pre_close=row['PRE_CLOSE'],
             close=row['PRICE'],

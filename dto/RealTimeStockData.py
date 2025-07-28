@@ -41,6 +41,7 @@ class RealTimeStockData:
         row = df.iloc[0]
         return StockDataDay(
             ts_code = row['TS_CODE'],
+            time=row['TIME'],
             open = row['OPEN'],
             pre_close = row['PRE_CLOSE'],
             close = row['PRICE'],
