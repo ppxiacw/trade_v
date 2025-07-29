@@ -4,7 +4,7 @@ import random
 ma_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
 bottom_line_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=bce85be747a6d8d29caa7b910b54bb442fb86fe77b7839375c4e41e71fe6fdae'
 shrink_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
-def send_dingtalk_message(title, tsCode,webhook_url):
+def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'):
     headers = {'Content-Type': 'application/json'}
     image_url = generate_stock_image_url(tsCode)
 
