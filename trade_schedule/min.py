@@ -10,6 +10,9 @@ import numpy as np
 from collections import deque
 from config.tushare_utils import IndexAnalysis
 from dto.StockDataDay import StockDataDay
+from utils import StockAnalysis
+
+stockAnalysis = StockAnalysis()
 from config.send_dingding import send_dingtalk_message
 # 配置信息
 CONFIG = {
@@ -57,6 +60,8 @@ class StockMonitor:
         """使用历史分钟数据初始化数据存储"""
         print("开始加载历史数据初始化存储...")
 
+        start_day = start_day =  stockAnalysis.get_date_by_step(stockAnalysis.get_today(),-20).replace('-','')
+
         # 获取当前日期和时间
         today = datetime.now().strftime("%Y%m%d")
         current_time = datetime.now().strftime("%H:%M:%S")
@@ -68,7 +73,7 @@ class StockMonitor:
                 # 获取1分钟历史数据
                 df_1min = ts.pro_bar(ts_code=stock,
                                      freq='1min',
-                                     start_date=today + " 09:30:00",
+                                     start_date=start_day + " 09:30:00",
                                      end_date=today + " " + current_time,
                                      limit=self.config["DATA_RETENTION"])
 
@@ -77,17 +82,20 @@ class StockMonitor:
                     df_1min = df_1min.sort_values('trade_time', ascending=True)
 
                     for _, row in df_1min.iterrows():
-                        # 将历史数据添加到1分钟存储
-                        self.data_storage[stock]["1min"]["times"].append(row['trade_time'])
-                        self.data_storage[stock]["1min"]["closes"].append(row['close'])
-                        self.data_storage[stock]["1min"]["vols"].append(row['vol'])
+                        candle_data = {
+                            'time': row['trade_time'],
+                            'open': row['open'],
+                            'close': row['close'],
+                            'vol': row['vol']
+                        }
+                        self.data_storage[stock]["1min"]["candles"].append(candle_data)
 
                 # 获取5分钟历史数据
                 # 计算需要的5分钟数据条数
                 five_min_count = max(1, self.config["DATA_RETENTION"] // 5)
                 df_5min = ts.pro_bar(ts_code=stock,
                                      freq='5min',
-                                     start_date=today + " 09:30:00",
+                                     start_date=start_day + " 09:30:00",
                                      end_date=today + " " + current_time,
                                      limit=five_min_count)
 
@@ -96,13 +104,15 @@ class StockMonitor:
                     df_5min = df_5min.sort_values('trade_time', ascending=True)
 
                     for _, row in df_5min.iterrows():
-                        # 将历史数据添加到5分钟存储
-                        self.data_storage[stock]["5min"]["times"].append(row['trade_time'])
-                        self.data_storage[stock]["5min"]["closes"].append(row['close'])
-                        self.data_storage[stock]["5min"]["vols"].append(row['vol'])
+                        candle_data = {
+                            'time': row['trade_time'],
+                            'open': row['open'],
+                            'close': row['close'],
+                            'vol': row['vol']
+                        }
+                        self.data_storage[stock]["5min"]["candles"].append(candle_data)
 
-                print(
-                    f"  {stock} 加载完成: 1min={len(self.data_storage[stock]['1min']['times'])}, 5min={len(self.data_storage[stock]['5min']['times'])}")
+                print(f"  {stock} 加载完成: 1min={len(self.data_storage[stock]['1min']['candles'])}, 5min={len(self.data_storage[stock]['5min']['candles'])}")
 
             except Exception as e:
                 print(f"  加载 {stock} 历史数据失败: {str(e)}")
@@ -115,27 +125,23 @@ class StockMonitor:
         for stock in self.config["MONITOR_STOCKS"]:
             self.data_storage[stock] = {
                 "1min": {
-                    "times": deque(maxlen=self.config["DATA_RETENTION"]),
-                    "closes": deque(maxlen=self.config["DATA_RETENTION"]),
-                    "vols": deque(maxlen=self.config["DATA_RETENTION"])
+                    # 使用candles列表存储K线数据，每个元素是一个字典
+                    "candles": deque(maxlen=self.config["DATA_RETENTION"])
                 },
                 "5min": {
-                    "times": deque(maxlen=self.config["DATA_RETENTION"] // 5),
-                    "closes": deque(maxlen=self.config["DATA_RETENTION"] // 5),
-                    "vols": deque(maxlen=self.config["DATA_RETENTION"] // 5)
+                    "candles": deque(maxlen=self.config["DATA_RETENTION"] // 5)
                 }
             }
 
     def fetch_realtime_data(self):
         """获取实时行情数据"""
-
         return IndexAnalysis.realtime_quote(ts_code=",".join(self.config["MONITOR_STOCKS"]))
 
 
 
     def update_data_storage(self, min_list):
         """更新数据存储"""
-        if min_list.__len__()==0:
+        if len(min_list) == 0:
             return
 
         current_time = datetime.now()
@@ -146,47 +152,55 @@ class StockMonitor:
                 if stock not in self.data_storage:
                     continue
 
-                # 更新1分钟数据
-                self.data_storage[stock]["1min"]["times"].append(row.time)
-                self.data_storage[stock]["1min"]["closes"].append(row.close)
-                self.data_storage[stock]["1min"]["vols"].append(row.vol)
+                # 更新1分钟数据 - 使用新的字典结构
+                candle_data = {
+                    'time': row.time,
+                    'open': row.open,  # 添加开盘价
+                    'close': row.close,
+                    'vol': row.vol
+                }
+                self.data_storage[stock]["1min"]["candles"].append(candle_data)
 
                 # 每5分钟更新一次5分钟数据
                 if current_time.minute % 5 == 0 and current_time.second < 10:
-                    if self.data_storage[stock]["1min"]["closes"]:
-                        # 计算5分钟收盘价（取最新价）
-                        five_min_price = row['close']
+                    if self.data_storage[stock]["1min"]["candles"]:
+                        # 获取最近5根1分钟K线
+                        last_five = list(self.data_storage[stock]["1min"]["candles"])[-5:]
 
-                        # 计算5分钟成交量（累计）
-                        if len(self.data_storage[stock]["1min"]["vols"]) >= 5:
-                            five_min_volume = sum(list(self.data_storage[stock]["1min"]["vols"])[-5:])
-                        else:
-                            five_min_volume = row['volume']
+                        # 计算5分钟K线的开盘价（第一个1分钟K线的开盘价）
+                        five_min_open = last_five[0]['open'] if last_five else row.close
+                        # 计算5分钟K线的收盘价（最后一个1分钟K线的收盘价）
+                        five_min_close = last_five[-1]['close'] if last_five else row.close
+                        # 计算5分钟成交量（5根1分钟K线成交量之和）
+                        five_min_vol = sum(candle['vol'] for candle in last_five) if last_five else row.vol
 
-                        self.data_storage[stock]["5min"]["times"].append(current_time)
-                        self.data_storage[stock]["5min"]["closes"].append(five_min_price)
-                        self.data_storage[stock]["5min"]["vols"].append(five_min_volume)
+                        # 创建5分钟K线数据
+                        five_min_candle = {
+                            'time': current_time.strftime("%Y-%m-%d %H:%M:%S"),
+                            'open': five_min_open,
+                            'close': five_min_close,
+                            'vol': five_min_vol
+                        }
+                        self.data_storage[stock]["5min"]["candles"].append(five_min_candle)
 
     def detect_volume_spike(self, stock, timeframe):
         """检测放量下跌情况"""
-        if not self.data_storage[stock][timeframe]["closes"] or len(self.data_storage[stock][timeframe]["closes"]) < 2:
+        candles = self.data_storage[stock][timeframe]["candles"]
+        if not candles or len(candles) < 2:
             return False
 
-        # 获取最近两个时间段的数据
-        current_price = self.data_storage[stock][timeframe]["closes"][-1]
-        previous_price = self.data_storage[stock][timeframe]["closes"][-2]
-
-        current_volume = self.data_storage[stock][timeframe]["vols"][-1]
-        previous_volume = self.data_storage[stock][timeframe]["vols"][-2]
+        # 获取最近两个K线的数据
+        current_candle = candles[-1]
+        previous_candle = candles[-2]
 
         # 计算价格变化百分比
-        price_change_pct = (current_price - previous_price) / previous_price * 100
+        price_change_pct = (current_candle['close'] - previous_candle['close']) / previous_candle['close'] * 100
 
         # 计算成交量比率
-        if previous_volume > 0:
-            volume_ratio = current_volume / previous_volume
+        if previous_candle['vol'] > 0:
+            volume_ratio = current_candle['vol'] / previous_candle['vol']
         else:
-            volume_ratio = 0  # 避免除零错误
+            volume_ratio = 0
 
         # 获取阈值
         thresholds = self.config["ALERT_THRESHOLDS"][timeframe]
@@ -199,14 +213,8 @@ class StockMonitor:
 
     def send_alert(self, stock):
         """发送警报通知"""
-        # 添加到历史记录
         self.alerts_history.append(stock)
-
-
-
-
-        send_dingtalk_message("分时监控",stock)
-
+        send_dingtalk_message("分时监控", stock)
 
     def get_stock_name(self, stock_code):
         """获取股票名称"""
@@ -232,11 +240,16 @@ class StockMonitor:
 
         # 1分钟K线图
         plt.subplot(2, 1, 1)
-        times = list(self.data_storage[stock]["1min"]["times"])
-        closes = list(self.data_storage[stock]["1min"]["closes"])
+        candles = list(self.data_storage[stock]["1min"]["candles"])
+        times = [candle['time'] for candle in candles]
+        closes = [candle['close'] for candle in candles]
+        opens = [candle['open'] for candle in candles]  # 使用开盘价
 
         if len(times) > 1 and len(closes) > 1:
-            plt.plot(times, closes, 'b-', label='价格')
+            # 绘制收盘价线
+            plt.plot(times, closes, 'b-', label='收盘价')
+            # 绘制开盘价线
+            plt.plot(times, opens, 'g--', label='开盘价')
             plt.title(f"{self.get_stock_name(stock)} 1分钟价格走势")
             plt.xlabel("时间")
             plt.ylabel("价格")
@@ -245,7 +258,7 @@ class StockMonitor:
 
         # 成交量图
         plt.subplot(2, 1, 2)
-        vols = list(self.data_storage[stock]["1min"]["vols"])
+        vols = [candle['vol'] for candle in candles]
 
         if len(times) > 1 and len(vols) > 1:
             plt.bar(times, vols, color='g', alpha=0.7, label='成交量')
@@ -266,40 +279,26 @@ class StockMonitor:
 
         while True:
             try:
-                # 获取实时数据
                 min_list = self.fetch_realtime_data()
-
-                if min_list.__len__()!=0:
-                    # 更新数据存储
+                if len(min_list) != 0:
                     self.update_data_storage(min_list)
-
-                    # 检测放量下跌
                     for stock in self.config["MONITOR_STOCKS"]:
                         for timeframe in ["1min", "5min"]:
                             alert = self.detect_volume_spike(stock, timeframe)
                             if True:
                                 self.send_alert(alert)
-
-                # 等待下一个监控周期
                 time.sleep(self.config["MONITOR_INTERVAL"])
-
             except KeyboardInterrupt:
                 print("\n监控已停止")
                 break
 
-
-
 # 启动监控系统
 if __name__ == "__main__":
     monitor = StockMonitor(CONFIG)
-
-    # 保持主线程运行
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         print("程序已退出")
-
-        # 退出前保存可视化图表
         for stock in CONFIG["MONITOR_STOCKS"]:
             monitor.visualize_data(stock)
