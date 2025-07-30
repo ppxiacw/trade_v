@@ -3,35 +3,29 @@ import pandas as pd
 import time
 import threading
 from datetime import datetime, timedelta
-import smtplib
-from email.mime.text import MIMEText
 import matplotlib.pyplot as plt
-import numpy as np
 from collections import deque
 from config.tushare_utils import IndexAnalysis
-from dto.StockDataDay import StockDataDay
 from utils import StockAnalysis
+import random
 
 stockAnalysis = StockAnalysis()
 from config.send_dingding import send_dingtalk_message
+
+start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replace('-', '')
+
 # 配置信息
 CONFIG = {
     "TUSHARE_TOKEN": "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5",  # 替换为你的实际Token
-    "MONITOR_STOCKS": ["600000.SH", "000001.SZ", "399001.SZ"],  # 监控的股票列表
+    # "MONITOR_STOCKS": ["600000.SH", "000001.SZ", "399001.SZ"],  # 监控的股票列表
+    "MONITOR_STOCKS": ["600000.SH"],  # 监控的股票列表
     "ALERT_THRESHOLDS": {
         "1min": {"volume_ratio": 1.8, "price_change": -0.8},  # 1分钟放量下跌阈值
         "5min": {"volume_ratio": 2.5, "price_change": -1.5}  # 5分钟放量下跌阈值
     },
     "MONITOR_INTERVAL": 60,  # 监控间隔(秒)
     "DATA_RETENTION": 8000,  # 保留多少分钟的数据
-    "EMAIL_SETTINGS": {
-        "enabled": True,  # 是否启用邮件通知
-        "sender": "your_email@example.com",
-        "password": "your_email_password",
-        "receiver": "alert_receiver@example.com",
-        "smtp_server": "smtp.example.com",
-        "smtp_port": 587
-    }
+    "DEBUG_MODE": True  # 调试模式开关
 }
 
 
@@ -41,6 +35,7 @@ class StockMonitor:
         self.data_storage = {}  # 存储各股票的历史数据
         self.alerts_history = []  # 存储历史警报
         self.initialize_data_storage()
+        self.manual_data_queue = []  # 存储手动输入的数据
 
         # 设置Tushare Token
         ts.set_token(config["TUSHARE_TOKEN"])
@@ -53,18 +48,23 @@ class StockMonitor:
         self.lock = threading.Lock()
 
         # 启动监控线程
-        self.monitor_thread = threading.Thread(target=self.start_monitoring, daemon=True)
-        self.monitor_thread.start()
+        if not config["DEBUG_MODE"]:
+            self.monitor_thread = threading.Thread(target=self.start_monitoring, daemon=True)
+            self.monitor_thread.start()
+        else:
+            print("调试模式已启用，监控线程未启动。使用手动触发功能进行测试。")
 
     def load_his_data(self):
         """使用历史分钟数据初始化数据存储"""
         print("开始加载历史数据初始化存储...")
 
-        start_day = start_day =  stockAnalysis.get_date_by_step(stockAnalysis.get_today(),-20).replace('-','')
-
-        # 获取当前日期和时间
-        today = datetime.now().strftime("%Y%m%d")
-        current_time = datetime.now().strftime("%H:%M:%S")
+        # 在调试模式下使用最近日期，避免非交易日错误
+        if self.config["DEBUG_MODE"]:
+            today = datetime.now().strftime("%Y%m%d")
+            current_time = datetime.now().strftime("%H:%M:%S")
+        else:
+            today = datetime.now().strftime("%Y%m%d")
+            current_time = datetime.now().strftime("%H:%M:%S")
 
         for stock in self.config["MONITOR_STOCKS"]:
             print(f"加载 {stock} 的历史数据...")
@@ -112,13 +112,13 @@ class StockMonitor:
                         }
                         self.data_storage[stock]["5min"]["candles"].append(candle_data)
 
-                print(f"  {stock} 加载完成: 1min={len(self.data_storage[stock]['1min']['candles'])}, 5min={len(self.data_storage[stock]['5min']['candles'])}")
+                print(
+                    f"  {stock} 加载完成: 1min={len(self.data_storage[stock]['1min']['candles'])}, 5min={len(self.data_storage[stock]['5min']['candles'])}")
 
             except Exception as e:
                 print(f"  加载 {stock} 历史数据失败: {str(e)}")
 
         print("历史数据初始化完成")
-
 
     def initialize_data_storage(self):
         """初始化数据存储结构"""
@@ -135,9 +135,10 @@ class StockMonitor:
 
     def fetch_realtime_data(self):
         """获取实时行情数据"""
-        return IndexAnalysis.realtime_quote(ts_code=",".join(self.config["MONITOR_STOCKS"]))
-
-
+        if self.config["DEBUG_MODE"]:
+            return self.get_manual_data()
+        else:
+            return IndexAnalysis.realtime_quote(ts_code=",".join(self.config["MONITOR_STOCKS"]))
 
     def update_data_storage(self, min_list):
         """更新数据存储"""
@@ -207,14 +208,19 @@ class StockMonitor:
 
         # 检测放量下跌
         if price_change_pct < thresholds["price_change"] and volume_ratio > thresholds["volume_ratio"]:
-            return stock
+            return True
 
-        return stock
+        return False
 
-    def send_alert(self, stock):
+    def send_alert(self, stock, timeframe):
         """发送警报通知"""
-        self.alerts_history.append(stock)
-        send_dingtalk_message("分时监控", stock)
+        alert_info = f"{self.get_stock_name(stock)} {timeframe}放量下跌警报 {datetime.now().strftime('%H:%M:%S')}"
+        self.alerts_history.append(alert_info)
+
+        if self.config["DEBUG_MODE"]:
+            print(f"[DEBUG] 警报触发: {alert_info}")
+        else:
+            send_dingtalk_message("分时监控", alert_info)
 
     def get_stock_name(self, stock_code):
         """获取股票名称"""
@@ -284,21 +290,149 @@ class StockMonitor:
                     self.update_data_storage(min_list)
                     for stock in self.config["MONITOR_STOCKS"]:
                         for timeframe in ["1min", "5min"]:
-                            alert = self.detect_volume_spike(stock, timeframe)
-                            if True:
-                                self.send_alert(alert)
+                            if self.detect_volume_spike(stock, timeframe):
+                                self.send_alert(stock, timeframe)
                 time.sleep(self.config["MONITOR_INTERVAL"])
             except KeyboardInterrupt:
                 print("\n监控已停止")
                 break
 
+    def input_manual_data(self):
+        """手动输入股票数据"""
+        print("\n===== 手动输入数据 =====")
+        for stock in self.config["MONITOR_STOCKS"]:
+            stock_name = self.get_stock_name(stock)
+            print(f"输入 {stock_name}({stock}) 的数据:")
+
+            time_str = input("  时间(格式YYYY-MM-DD HH:MM:SS，直接回车使用当前时间): ")
+            if not time_str:
+                time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            open_price = float(input("  开盘价: "))
+            close_price = float(input("  收盘价: "))
+            volume = int(input("  成交量(股): "))
+
+            # 创建模拟数据点
+            data_point = pd.Series({
+                'ts_code': stock,
+                'open': open_price,
+                'close': close_price,
+                'vol': volume,
+                'time': time_str
+            })
+
+            self.manual_data_queue.append(data_point)
+            print(f"已添加 {stock} 的数据到队列")
+        print("=" * 30)
+
+    def get_manual_data(self):
+        """从手动输入队列获取数据"""
+        if not self.manual_data_queue:
+            print("手动数据队列为空，请先输入数据")
+            return []
+
+        # 每次返回一条数据
+        return [self.manual_data_queue.pop(0)]
+
+    def manual_trigger_detection(self):
+        """手动触发检测"""
+        print("\n===== 手动触发检测 =====")
+
+        # 如果队列为空，提示输入数据
+        if not self.manual_data_queue:
+            print("手动数据队列为空，请先输入数据")
+            self.input_manual_data()
+
+        # 获取并处理手动数据
+        min_list = self.get_manual_data()
+        if min_list:
+            self.update_data_storage(min_list)
+
+            # 执行检测
+            for stock in self.config["MONITOR_STOCKS"]:
+                for timeframe in ["1min", "5min"]:
+                    if self.detect_volume_spike(stock, timeframe):
+                        print(f"检测到放量下跌: {stock} {timeframe}")
+                        self.send_alert(stock, timeframe)
+                    else:
+                        print(f"未检测到放量下跌: {stock} {timeframe}")
+
+        # 显示最新数据
+        for stock in self.config["MONITOR_STOCKS"]:
+            if self.data_storage[stock]["1min"]["candles"]:
+                last_candle = self.data_storage[stock]["1min"]["candles"][-1]
+                print(
+                    f"{stock} 最新数据: 时间={last_candle['time']}, 收盘价={last_candle['close']:.2f}, 成交量={last_candle['vol']}")
+
+        print("=" * 30)
+
+    def debug_menu(self):
+        """调试菜单"""
+        while True:
+            print("\n===== 调试菜单 =====")
+            print("1. 手动输入数据")
+            print("2. 手动触发检测")
+            print("3. 显示数据存储状态")
+            print("4. 可视化股票数据")
+            print("5. 显示警报历史")
+            print("6. 退出")
+
+            choice = input("请选择操作: ")
+
+            if choice == "1":
+                self.input_manual_data()
+            elif choice == "2":
+                self.manual_trigger_detection()
+            elif choice == "3":
+                self.display_data_storage()
+            elif choice == "4":
+                stock = input("输入股票代码(如600000.SH): ")
+                self.visualize_data(stock)
+            elif choice == "5":
+                self.display_alert_history()
+            elif choice == "6":
+                print("退出调试菜单")
+                break
+            else:
+                print("无效选择，请重新输入")
+
+    def display_data_storage(self):
+        """显示数据存储状态"""
+        print("\n数据存储状态:")
+        for stock, timeframes in self.data_storage.items():
+            print(f"{self.get_stock_name(stock)}:")
+            for timeframe, data in timeframes.items():
+                count = len(data["candles"])
+                if count > 0:
+                    last_candle = data["candles"][-1]
+                    print(f"  {timeframe}: {count}条数据, 最新: {last_candle['time']} "
+                          f"收盘价={last_candle['close']:.2f} 成交量={last_candle['vol']}")
+                else:
+                    print(f"  {timeframe}: 无数据")
+
+    def display_alert_history(self):
+        """显示警报历史"""
+        print("\n警报历史:")
+        if not self.alerts_history:
+            print("  无警报记录")
+            return
+
+        for i, alert in enumerate(self.alerts_history, 1):
+            print(f"{i}. {alert}")
+
+
 # 启动监控系统
 if __name__ == "__main__":
     monitor = StockMonitor(CONFIG)
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("程序已退出")
-        for stock in CONFIG["MONITOR_STOCKS"]:
-            monitor.visualize_data(stock)
+
+    if CONFIG["DEBUG_MODE"]:
+        print("运行在调试模式，使用调试菜单进行测试")
+        monitor.debug_menu()
+    else:
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("程序已退出")
+            for stock in CONFIG["MONITOR_STOCKS"]:
+                monitor.visualize_data(stock)
