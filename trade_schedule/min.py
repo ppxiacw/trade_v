@@ -184,37 +184,84 @@ class StockMonitor:
                         }
                         self.data_storage[stock]["5min"]["candles"].append(five_min_candle)
 
-    def detect_volume_spike(self, stock, timeframe):
-        """检测放量下跌情况"""
-        candles = self.data_storage[stock][timeframe]["candles"]
-        if not candles or len(candles) < 2:
-            return False
+    ############################################################
+    # 重构后的检测方法，支持多种警报条件的灵活扩展
+    ############################################################
 
-        # 获取最近两个K线的数据
+    def check_alert_conditions(self, stock, timeframe):
+        """
+        检查所有警报条件
+        返回: 满足的警报条件列表 (空列表表示没有警报)
+        """
+        triggered_conditions = []
+
+        # 获取最近的K线数据
+        candles = self.data_storage[stock][timeframe]["candles"]
+        if len(candles) < 2:
+            return triggered_conditions
+
         current_candle = candles[-1]
         previous_candle = candles[-2]
 
-        # 计算价格变化百分比
-        price_change_pct = (current_candle['close'] - previous_candle['close']) / previous_candle['close'] * 100
-
-        # 计算成交量比率
-        if previous_candle['vol'] > 0:
-            volume_ratio = current_candle['vol'] / previous_candle['vol']
-        else:
-            volume_ratio = 0
-
-        # 获取阈值
+        # 获取阈值配置
         thresholds = self.config["ALERT_THRESHOLDS"][timeframe]
 
-        # 检测放量下跌
-        if price_change_pct < thresholds["price_change"] and volume_ratio > thresholds["volume_ratio"]:
-            return True
+        # 检查各个警报条件
+        if self._check_volume_spike(current_candle, previous_candle, thresholds):
+            triggered_conditions.append("volume_spike")
 
+        if self._check_price_drop(current_candle, previous_candle, thresholds):
+            triggered_conditions.append("price_drop")
+
+        # 在这里可以添加更多的检测条件
+        # 例如:
+        # if self._check_rsi_oversold(stock, timeframe):
+        #     triggered_conditions.append("rsi_oversold")
+        #
+        # if self._check_macd_crossover(stock, timeframe):
+        #     triggered_conditions.append("macd_crossover")
+
+        return triggered_conditions
+
+    def _check_volume_spike(self, current_candle, previous_candle, thresholds):
+        """检测成交量激增"""
+        if previous_candle['vol'] > 0:
+            volume_ratio = current_candle['vol'] / previous_candle['vol']
+            return volume_ratio > thresholds.get("volume_ratio", 1.0)
         return False
 
-    def send_alert(self, stock, timeframe):
+    def _check_price_drop(self, current_candle, previous_candle, thresholds):
+        """检测价格下跌"""
+        price_change_pct = (current_candle['close'] - previous_candle['close']) / previous_candle['close'] * 100
+        return price_change_pct < thresholds.get("price_change", 0.0)
+
+    # 示例：添加其他检测条件的模板
+    # def _check_rsi_oversold(self, stock, timeframe):
+    #     """检测RSI指标超卖"""
+    #     # 这里实现RSI计算和检测逻辑
+    #     # 返回 True 如果RSI低于阈值 (例如 < 30)
+    #     pass
+    #
+    # def _check_macd_crossover(self, stock, timeframe):
+    #     """检测MACD指标金叉/死叉"""
+    #     # 这里实现MACD计算和检测逻辑
+    #     # 返回 True 如果MACD线穿过信号线
+    #     pass
+
+
+    def send_alert(self, stock, timeframe, conditions):
         """发送警报通知"""
-        alert_info = f"{self.get_stock_name(stock)} {timeframe}放量下跌警报 {datetime.now().strftime('%H:%M:%S')}"
+        condition_names = {
+            "volume_spike": "成交量激增",
+            "price_drop": "价格下跌",
+            # 添加其他条件的描述
+        }
+
+        # 将条件代码转换为可读名称
+        readable_conditions = [condition_names.get(c, c) for c in conditions]
+        conditions_str = "、".join(readable_conditions)
+
+        alert_info = f"{self.get_stock_name(stock)} {timeframe} {conditions_str}警报 {datetime.now().strftime('%H:%M:%S')}"
         self.alerts_history.append(alert_info)
 
         if self.config["DEBUG_MODE"]:
@@ -290,8 +337,10 @@ class StockMonitor:
                     self.update_data_storage(min_list)
                     for stock in self.config["MONITOR_STOCKS"]:
                         for timeframe in ["1min", "5min"]:
-                            if self.detect_volume_spike(stock, timeframe):
-                                self.send_alert(stock, timeframe)
+                            # 使用重构后的检测方法
+                            conditions = self.check_alert_conditions(stock, timeframe)
+                            if conditions:
+                                self.send_alert(stock, timeframe, conditions)
                 time.sleep(self.config["MONITOR_INTERVAL"])
             except KeyboardInterrupt:
                 print("\n监控已停止")
@@ -351,11 +400,13 @@ class StockMonitor:
             # 执行检测
             for stock in self.config["MONITOR_STOCKS"]:
                 for timeframe in ["1min", "5min"]:
-                    if self.detect_volume_spike(stock, timeframe):
-                        print(f"检测到放量下跌: {stock} {timeframe}")
-                        self.send_alert(stock, timeframe)
+                    # 使用重构后的检测方法
+                    conditions = self.check_alert_conditions(stock, timeframe)
+                    if conditions:
+                        print(f"检测到警报条件: {stock} {timeframe} - {', '.join(conditions)}")
+                        self.send_alert(stock, timeframe, conditions)
                     else:
-                        print(f"未检测到放量下跌: {stock} {timeframe}")
+                        print(f"未检测到警报条件: {stock} {timeframe}")
 
         # 显示最新数据
         for stock in self.config["MONITOR_STOCKS"]:
