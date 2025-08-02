@@ -1,6 +1,5 @@
-from config.tushare_utils import IndexAnalysis
 from dto.StockDataDay import StockDataDay
-from utils import StockAnalysis
+from utils.date_utils import Date_utils
 from config.dbconfig import  db_pool
 from filter.ContinuousRedFilter import ContinuousRedFilter
 from filter.FluctuationRangeFilter import FluctuationRangeFilter
@@ -9,7 +8,7 @@ from filter.TurnoverRateFilter import TurnoverRateFilter
 conn = db_pool.get_connection()
 cursor = conn.cursor()
 
-analysis = StockAnalysis()
+analysis = Date_utils()
 
 yesterday = analysis.get_date_by_step(analysis.get_today(),-1)
 

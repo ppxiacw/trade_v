@@ -1,12 +1,12 @@
-from config.tushare_utils import IndexAnalysis
+from utils.tushare_utils import IndexAnalysis
 from dto.StockDataDay import StockDataDay
-from utils import StockAnalysis
+from utils.date_utils import Date_utils
 from filter.ContinuousRedFilter import ContinuousRedFilter
 from filter.FluctuationRangeFilter import FluctuationRangeFilter
 from filter.IntervalRangeFilter import IntervalRangeFilter
 from filter.NewHighFilter import NewHighFilter
 from filter.OneFilter import OneFilter
-analysis = StockAnalysis()
+analysis = Date_utils()
 
 
 

@@ -4,14 +4,14 @@ from filter.FluctuationRangeFilter import FluctuationRangeFilter
 from filter.IntervalRangeFilter import IntervalRangeFilter
 from filter.TurnoverRateFilter import TurnoverRateFilter
 
-from utils import StockAnalysis
+from utils.date_utils import Date_utils
 from config.dbconfig import db_pool
 from typing import Tuple, Optional
 from pattern.ShrinkageByDate import ShrinkageByDate
 conn = db_pool.get_connection()
 cursor = conn.cursor()
 
-analysis = StockAnalysis()
+analysis = Date_utils()
 
 yesterday = analysis.get_date_by_step(analysis.get_today(), -1)
 

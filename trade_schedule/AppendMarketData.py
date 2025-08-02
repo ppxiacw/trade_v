@@ -1,15 +1,15 @@
 import os
 
 import pandas as pd
-from config.tushare_utils import ts
+from utils.tushare_utils import ts
 from config.dbconfig import engine
 
 
-from utils import StockAnalysis
+from utils.date_utils import Date_utils
 token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
-analysis = StockAnalysis()
+analysis = Date_utils()
 today = analysis.get_today(replace=True)
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)

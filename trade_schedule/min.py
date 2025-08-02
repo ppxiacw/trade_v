@@ -2,15 +2,14 @@ import tushare as ts
 import pandas as pd
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 import matplotlib.pyplot as plt
 from collections import deque
-from config.tushare_utils import IndexAnalysis
-from utils import StockAnalysis
-import random
+from utils.tushare_utils import IndexAnalysis
+from utils.date_utils import Date_utils
 
-stockAnalysis = StockAnalysis()
-from config.send_dingding import send_dingtalk_message
+stockAnalysis = Date_utils()
+from utils.send_dingding import send_dingtalk_message
 
 start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replace('-', '')
 
@@ -234,19 +233,6 @@ class StockMonitor:
         """检测价格下跌"""
         price_change_pct = (current_candle['close'] - previous_candle['close']) / previous_candle['close'] * 100
         return price_change_pct < thresholds.get("price_change", 0.0)
-
-    # 示例：添加其他检测条件的模板
-    # def _check_rsi_oversold(self, stock, timeframe):
-    #     """检测RSI指标超卖"""
-    #     # 这里实现RSI计算和检测逻辑
-    #     # 返回 True 如果RSI低于阈值 (例如 < 30)
-    #     pass
-    #
-    # def _check_macd_crossover(self, stock, timeframe):
-    #     """检测MACD指标金叉/死叉"""
-    #     # 这里实现MACD计算和检测逻辑
-    #     # 返回 True 如果MACD线穿过信号线
-    #     pass
 
 
     def send_alert(self, stock, timeframe, conditions):

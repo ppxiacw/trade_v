@@ -1,10 +1,10 @@
 from config.dbconfig import db_pool
 from dto.StockDataDay import StockDataDay
-from config.tushare_utils import IndexAnalysis
+from utils.tushare_utils import IndexAnalysis
 from collections import defaultdict
-from TradingDayCalculator import calculator
+from utils.TradingDayCalculator import calculator
 
-from utils import stockAnalysis
+from utils.date_utils import stockAnalysis
 class ShrinkageByDate:
     # 类属性存储所有股票的历史数据
     _stock_data = None

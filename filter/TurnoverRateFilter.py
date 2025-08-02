@@ -1,7 +1,7 @@
 
 from dto.StockDataDay import StockDataDay
 from config.dbconfig import db_pool
-from config.tushare_utils import IndexAnalysis
+from utils.tushare_utils import IndexAnalysis
 
 conn = db_pool.get_connection()
 cursor = conn.cursor(dictionary=True)

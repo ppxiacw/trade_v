@@ -1,22 +1,15 @@
-import hashlib
-import json
-import time
 from datetime import datetime, timedelta
-import hmac
-import base64
-import urllib.parse
-import requests
 import pandas as pd
 from typing import List, Dict, Set
-from config.tushare_utils import ts
+from utils.tushare_utils import ts
 from dto.StockDataDay import StockDataDay
-from config.tushare_utils import IndexAnalysis
-from utils import stockAnalysis
-from value.value import today, today_
-from TopList import export_top_list
-from config.send_dingding import *
+from utils.tushare_utils import IndexAnalysis
+from utils.date_utils import Date_utils
+from utils.send_dingding import *
+today_ = Date_utils.get_today()
+today =  Date_utils.get_today(replace=True)
 
-start_date = stockAnalysis.get_date_by_step(today_,-200).replace("-","")
+start_date = Date_utils.get_date_by_step(today_,-200).replace("-","")
 with open('./top_list_files/etf.txt', 'r', encoding='utf-8') as f:
     # 使用集合推导式 + 去除换行符 + 过滤空行
     all_stocks = {line.strip() for line in f if line.strip()}

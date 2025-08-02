@@ -6,6 +6,7 @@ from datetime import datetime  # 正确导入 datetime 类
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
+from trade_schedule.GetStockData import result
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
@@ -25,7 +26,7 @@ token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
 
-stock_list = pd.read_csv(f'{relative_path}/stock_list_filter.csv',dtype={'symbol':str})
+stock_list  = result
 class IndexAnalysis:
     def __init__(self):
         pass

@@ -3,20 +3,23 @@ import pandas as pd
 import adata
 
 
-class StockAnalysis:
-    def __init__(self):
-        self.calendar_cache = None  # 缓存交易日历
-        self.stock_info_df = None  # 缓存股票信息数据框
+class Date_utils:
+    calendar_cache = {}  # 类级别的交易日历缓存
+    stock_info_df = None  # 类级别的股票信息缓存
 
-    def get_trade_calendar(self, year=None):
+    @staticmethod
+    def get_trade_calendar(year=None):
         if not year:
             year = datetime.now().year
-        if not self.calendar_cache or str(year) not in self.calendar_cache:
-            self.calendar_cache = {str(year): adata.stock.info.trade_calendar(str(year))}
-        return self.calendar_cache[str(year)]
+        year_str = str(year)
 
-    def get_date_by_step(self, date_str, n):
-        calendar = self.get_trade_calendar(date_str[:4])
+        if year_str not in Date_utils.calendar_cache:
+            Date_utils.calendar_cache[year_str] = adata.stock.info.trade_calendar(year_str)
+        return Date_utils.calendar_cache[year_str]
+
+    @staticmethod
+    def get_date_by_step(date_str, n):
+        calendar = Date_utils.get_trade_calendar(date_str[:4])
         start_index = calendar[calendar['trade_date'] == date_str].index[0] if not calendar[
             calendar['trade_date'] == date_str].empty else None
 
@@ -41,17 +44,17 @@ class StockAnalysis:
                             break
                 result_df = pd.DataFrame(selected_rows)['trade_date']
                 return result_df.iloc[-1]
-                # 恢复原始顺序（向前）
             else:
-                result_df = pd.DataFrame()  # 如果 n 是 0，则返回空 DataFrame
+                return pd.DataFrame()  # 如果 n 是 0，则返回空 DataFrame
         else:
             print(f"没有找到 trade_date 为 {date_str} 的记录")
             return None
 
-    def get_today(self, replace=False):
+    @staticmethod
+    def get_today(replace=False):
         now = datetime.now()
         today_str = now.strftime('%Y-%m-%d')
-        calendar = self.get_trade_calendar(today_str[:4])
+        calendar = Date_utils.get_trade_calendar(today_str[:4])
         index = calendar[calendar['trade_date'] == today_str].index[0] if not calendar[
             calendar['trade_date'] == today_str].empty else None
 
@@ -74,10 +77,8 @@ class StockAnalysis:
             return today_str
 
 
-stockAnalysis = StockAnalysis()
-
 # 使用类进行分析
 if __name__ == "__main__":
-    an = StockAnalysis()
-    a = an.get_trade_calendar()
-    print(1)
+    # 直接调用静态方法，无需实例化
+    a = Date_utils.get_trade_calendar()
+    print(a)

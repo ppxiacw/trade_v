@@ -1,7 +1,7 @@
 import pandas as pd
 import bisect
 from datetime import datetime
-from utils import StockAnalysis
+from utils.date_utils import Date_utils
 
 
 class TradingDayCalculator:
@@ -12,7 +12,7 @@ class TradingDayCalculator:
         参数:
             df_calendar (DataFrame): 必须包含'trade_date'和'trade_status'列
         """
-        stockAnalysis = StockAnalysis()
+        stockAnalysis = Date_utils()
         data1 = stockAnalysis.get_trade_calendar('2024')
         data2 = stockAnalysis.get_trade_calendar('2025')
         data = pd.concat([data1,data2])

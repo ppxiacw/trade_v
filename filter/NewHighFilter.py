@@ -1,12 +1,12 @@
 from dto.StockDataDay import StockDataDay
-from config.tushare_utils import IndexAnalysis
+from utils.tushare_utils import IndexAnalysis
 from config.dbconfig import exeQuery
-from config.Value import testDate
+from utils.date_utils import Date_utils
 
 
 # 执行SQL查询
 # query = f'SELECT DISTINCT max(high) as high, ts_code FROM market WHERE trade_date >= DATE_SUB("2025-04-09", INTERVAL 10 DAY) GROUP BY ts_code;'
-query = f'SELECT DISTINCT max(high) as high, ts_code FROM market WHERE trade_date >= DATE_SUB({testDate}, INTERVAL 10 DAY) GROUP BY ts_code;'
+query = f'SELECT DISTINCT max(high) as high, ts_code FROM market WHERE trade_date >= DATE_SUB({Date_utils.get_today()}, INTERVAL 10 DAY) GROUP BY ts_code;'
 
 results=exeQuery(query)
 

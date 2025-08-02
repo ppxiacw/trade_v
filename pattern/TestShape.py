@@ -1,18 +1,14 @@
-import json
-
 import pandas as pd
-from flask import send_file
 
 from  pattern.RedStar import RedStar
-from config.tushare_utils import IndexAnalysis
-from trade_schedule import AppendMarketData
+from utils.tushare_utils import IndexAnalysis
 from pattern.FindShrinkage import FindShrinkage
 from pattern.ShirnkageAfter import ShirnkageAfter
 import os
 from datetime import datetime
 from pattern.ShrinkageByDate import ShrinkageByDate
 from filter.OneFilter import OneFilter
-from config.send_dingding import *
+from utils.send_dingding import *
 import time
 
 # 获取当前脚本的完整路径

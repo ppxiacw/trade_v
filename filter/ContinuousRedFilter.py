@@ -1,7 +1,7 @@
 from dto.StockDataDay import StockDataDay
 from config.dbconfig import  exeQuery
-from config.Value import testDate
-from config.tushare_utils import IndexAnalysis
+from utils.date_utils import Date_utils
+from utils.tushare_utils import IndexAnalysis
 
 # 执行SQL查询
 query = f"""
@@ -15,7 +15,7 @@ WITH recent_trades AS (
             ORDER BY trade_date DESC
         ) AS rn
     FROM trade.market
-    where trade_date <= {testDate}
+    where trade_date <= {Date_utils.get_today()}
 )
 SELECT ts_code
 FROM recent_trades
