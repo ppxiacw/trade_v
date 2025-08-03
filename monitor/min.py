@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from collections import deque
 from utils.tushare_utils import IndexAnalysis
 from utils.date_utils import Date_utils
+from utils.GetStockData import result
 
 stockAnalysis = Date_utils()
 from utils.send_dingding import send_dingtalk_message
@@ -16,8 +17,8 @@ start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replac
 # 配置信息
 CONFIG = {
     "TUSHARE_TOKEN": "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5",  # 替换为你的实际Token
-    # "MONITOR_STOCKS": ["600000.SH", "000001.SZ", "399001.SZ"],  # 监控的股票列表
-    "MONITOR_STOCKS": ["600000.SH"],  # 监控的股票列表
+    # "MONITOR_STOCKS": ["600000.SH", "000001.SZ", "399001.SZ","399006.SZ"],  # 监控的股票列表
+    "MONITOR_STOCKS": ["000001.SH"],  # 监控的股票列表
     "ALERT_THRESHOLDS": {
         "1min": {"volume_ratio": 1.8, "price_change": -0.8},  # 1分钟放量下跌阈值
         "5min": {"volume_ratio": 2.5, "price_change": -1.5}  # 5分钟放量下跌阈值
@@ -260,12 +261,7 @@ class StockMonitor:
         try:
             # 这里可以使用Tushare的stock_basic接口获取股票名称
             # 简化处理：使用一个映射表
-            name_map = {
-                "600000.SH": "浦发银行",
-                "000001.SZ": "平安银行",
-                "399001.SZ": "深证成指"
-            }
-            return name_map.get(stock_code, stock_code)
+            return result['000001.SZ']['name']
         except:
             return stock_code
 

@@ -6,7 +6,7 @@ from datetime import datetime  # 正确导入 datetime 类
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
-from trade_schedule.GetStockData import result
+from utils.GetStockData import result
 
 # 获取当前脚本的完整路径
 current_path = os.path.abspath(__file__)
