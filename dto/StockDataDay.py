@@ -62,18 +62,18 @@ class StockDataDay:
 
         # 从 DataFrame 中提取数据并创建实例
         return StockDataDay(
-            ts_code=df['stock_code'],
-            time=df['time'],
-            trade_date=df['trade_date'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            pre_close=df['pre_close'],
-            change=df['change'],
-            pct_chg=df['change_pct'],
-            vol=df['volume'],
-            amount=df['amount']
+            ts_code=df['stock_code'] if not pd.isna(df.get('stock_code')) else None,
+            time=df['time'] if not pd.isna(df.get('time')) else None,
+            trade_date=df['trade_date'] if not pd.isna(df.get('trade_date')) else None,
+            open=float(df['open']) if not pd.isna(df.get('open')) else None,
+            high=float(df['high']) if not pd.isna(df.get('high')) else None,
+            low=float(df['low']) if not pd.isna(df.get('low')) else None,
+            close=float(df['close']) if not pd.isna(df.get('close')) else None,
+            pre_close=float(df['pre_close']) if not pd.isna(df.get('pre_close')) else None,
+            change=float(df['change']) if not pd.isna(df.get('change')) else None,
+            pct_chg=float(df['change_pct']) if not pd.isna(df.get('change_pct')) else None,
+            vol=int(df['volume']) if not pd.isna(df.get('volume')) else None,
+            amount=float(df['amount']) if not pd.isna(df.get('amount')) else None
         )
 
     @staticmethod

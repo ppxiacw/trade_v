@@ -37,7 +37,6 @@ try:
     # 美化输出
     pretty_json = json.dumps(result_dict, indent=4, ensure_ascii=False)
 
-    print(pretty_json)
 
 except Exception as e:
     print(f"发生错误: {str(e)}")

@@ -1,3 +1,5 @@
+import json
+
 import tushare as ts
 import pandas as pd
 import time
@@ -9,7 +11,7 @@ from utils.tushare_utils import IndexAnalysis
 from utils.date_utils import Date_utils
 from utils.GetStockData import result_dict
 from utils.send_dingding import send_dingtalk_message
-
+from dto.StockDataDay import StockDataDay
 stockAnalysis = Date_utils()
 start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replace('-', '')
 
@@ -17,18 +19,34 @@ start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replac
 CONFIG = {
     "TUSHARE_TOKEN": "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5",
     "MONITOR_STOCKS": {
-        "000001.SZ": {  # 上证指数
-            "windows_sec": [60, 300, 900],  # 监控60秒、300秒、900秒窗口
+        "603406.SH": {  # 上证指数
+            "windows_sec": [10, 60, 600],  # 监控60秒、300秒、900秒窗口
             "thresholds": {
-                60: {"price_change": -0.8},  # 60秒窗口阈值
-                300: {"price_change": -1.5},  # 300秒窗口阈值
-                900: {"price_change": -2.0}  # 900秒窗口阈值
+                10: {"price_change": -0.8},  # 60秒窗口阈值
+                60: {"price_change": -1.5},  # 300秒窗口阈值
+                600: {"price_change": -2.0}  # 900秒窗口阈值
+            }
+        },
+        "603007.Sh": {  # 上证指数
+            "windows_sec": [10, 60, 600],  # 监控60秒、300秒、900秒窗口
+            "thresholds": {
+                10: {"price_change": -0.8},  # 60秒窗口阈值
+                60: {"price_change": -1.5},  # 300秒窗口阈值
+                600: {"price_change": -2.0}  # 900秒窗口阈值
+            }
+        },
+        "600356.Sh": {  # 上证指数
+            "windows_sec": [10, 60, 600],  # 监控60秒、300秒、900秒窗口
+            "thresholds": {
+                10: {"price_change": -0.8},  # 60秒窗口阈值
+                60: {"price_change": -1.5},  # 300秒窗口阈值
+                600: {"price_change": -2.0}  # 900秒窗口阈值
             }
         }
     },
     "BASE_INTERVAL": 1,  # 基础数据收集间隔(秒)
     "DATA_RETENTION_HOURS": 10,  # 保留多少小时的数据
-    "DEBUG_MODE": True  # 调试模式开关
+    "DEBUG_MODE": False  # 调试模式开关
 }
 
 
@@ -98,16 +116,15 @@ class StockMonitor:
         with self.lock:
             for row in data_list:
                 stock = row.ts_code
-                if stock not in self.data_storage:
-                    continue
+                # if stock not in self.data_storage:
+                #     continue
 
                 # 更新基础数据
                 candle_data = {
                     'timestamp': current_time,
                     'open': row.open,
-                    'high': getattr(row, 'high', row.open),
-                    'price': getattr(row, 'price', row.price),
-                    'low': getattr(row, 'low', row.open),
+                    'high': getattr(row, 'high', row.high),
+                    'low': getattr(row, 'low', row.low),
                     'close': row.close,
                     'vol': row.vol
                 }
@@ -135,7 +152,7 @@ class StockMonitor:
             triggered_conditions.append("volume_spike")
 
         if self._check_price_movement(candles, self.config["MONITOR_STOCKS"][stock]):
-            triggered_conditions.append("price_drop")
+            triggered_conditions.append("price_change")
 
         return triggered_conditions
 
@@ -168,7 +185,7 @@ class StockMonitor:
             recent_prices = price_array[-window_length:]
 
             # 提取价格
-            prices = [candle['price'] for candle in recent_prices]
+            prices = [candle['close'] for candle in recent_prices]
 
             # 计算窗口内的最高价和最低价
             highest_price = max(prices)
@@ -215,7 +232,7 @@ class StockMonitor:
         """发送警报通知"""
         condition_names = {
             "volume_spike": "成交量激增",
-            "price_drop": "价格下跌",
+            "price_change": "价格波动",
         }
 
         # 将条件代码转换为可读名称
@@ -270,40 +287,40 @@ class StockMonitor:
                 break
 
     def input_manual_data(self):
-        """手动输入股票数据"""
-        print("\n===== 手动输入数据 =====")
-        for stock in self.config["MONITOR_STOCKS"].keys():
-            stock_name = self.get_stock_name(stock)
-            print(f"输入 {stock_name}({stock}) 的数据:")
+        """从JSON文件读取股票数据"""
+        print("\n===== 从JSON文件读取数据 =====")
 
-            time_str = input("  时间(格式YYYY-MM-DD HH:MM:SS，直接回车使用当前时间): ")
-            if not time_str:
-                timestamp = datetime.now()
-            else:
-                timestamp = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        json_file = "manual.json"
 
-            open_price = float(input("  开盘价: "))
-            high_price = float(input("  最高价: "))
-            price = float(input("  当前价: "))
-            low_price = float(input("  最低价: "))
-            close_price = float(input("  收盘价: "))
-            volume = int(input("  成交量(股): "))
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data_list = json.load(f)
 
-            # 创建模拟数据点
-            data_point = pd.Series({
-                'ts_code': stock,
-                'open': open_price,
-                'high': high_price,
-                'price': price,
-                'low': low_price,
-                'close': close_price,
-                'vol': volume,
-                'time': timestamp.strftime("%Y-%m-%d %H:%M:%S")
-            })
+            for i, data in enumerate(data_list):
+                # 转换时间格式
+                if 'time' in data:
+                    timestamp = datetime.strptime(data['time'], "%Y-%m-%d %H:%M:%S")
+                else:
+                    timestamp = datetime.now()
 
-            self.manual_data_queue.append(data_point)
-            self.update_data_storage(self.get_manual_data())
-            print(f"已添加 {stock} 的数据到队列")
+                # 创建数据点
+                data_point = pd.Series({
+                    'stock_code': data['ts_code'],
+                    'open': float(data['open']),
+                    'high': float(data['high']),
+                    'low': float(data['low']),
+                    'close': float(data['close']),
+                    'vol': int(data['vol']),
+                    'time': timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                })
+                data_list[i] = StockDataDay.from_json(data_point)
+            self.update_data_storage(data_list)
+            print(f"成功从 {json_file} 读取了 {len(data_list)} 条数据")
+
+        except Exception as e:
+            print(f"错误：{e}")
+        except json.JSONDecodeError:
+            print(f"错误：文件 {json_file} 格式不正确")
 
     def get_manual_data(self):
         """从手动输入队列获取数据"""
@@ -324,7 +341,6 @@ class StockMonitor:
                 # 使用重构后的检测方法
                 conditions = self.check_alert_conditions(stock, window_sec)
                 if conditions:
-                    print(f"检测到警报条件: {stock} {window_sec}秒 - {', '.join(conditions)}")
                     self.send_alert(stock, window_sec, conditions)
                 else:
                     print(f"未检测到警报条件: {stock} {window_sec}秒")
