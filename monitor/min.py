@@ -2,47 +2,49 @@ import tushare as ts
 import pandas as pd
 import time
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
-from collections import deque
+import numpy as np
 from utils.tushare_utils import IndexAnalysis
 from utils.date_utils import Date_utils
-from utils.GetStockData import result
-
-stockAnalysis = Date_utils()
+from utils.GetStockData import result_dict
 from utils.send_dingding import send_dingtalk_message
 
+stockAnalysis = Date_utils()
 start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replace('-', '')
 
-# 配置信息
+# 配置信息 - 支持个股独立时间窗口（以秒为单位）
 CONFIG = {
-    "TUSHARE_TOKEN": "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5",  # 替换为你的实际Token
-    # "MONITOR_STOCKS": ["600000.SH", "000001.SZ", "399001.SZ","399006.SZ"],  # 监控的股票列表
-    "MONITOR_STOCKS": ["000001.SH"],  # 监控的股票列表
-    "ALERT_THRESHOLDS": {
-        "1min": {"volume_ratio": 1.8, "price_change": -0.8},  # 1分钟放量下跌阈值
-        "5min": {"volume_ratio": 2.5, "price_change": -1.5}  # 5分钟放量下跌阈值
+    "TUSHARE_TOKEN": "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5",
+    "MONITOR_STOCKS": {
+        "000001.SZ": {  # 上证指数
+            "windows_sec": [60, 300, 900],  # 监控60秒、300秒、900秒窗口
+            "thresholds": {
+                60: {"price_change": -0.8},  # 60秒窗口阈值
+                300: {"price_change": -1.5},  # 300秒窗口阈值
+                900: {"price_change": -2.0}  # 900秒窗口阈值
+            }
+        }
     },
-    "MONITOR_INTERVAL": 60,  # 监控间隔(秒)
-    "DATA_RETENTION": 8000,  # 保留多少分钟的数据
+    "BASE_INTERVAL": 1,  # 基础数据收集间隔(秒)
+    "DATA_RETENTION_HOURS": 10,  # 保留多少小时的数据
     "DEBUG_MODE": True  # 调试模式开关
 }
 
 
 class StockMonitor:
     def __init__(self, config):
+        self.stock_name_cache = {}
         self.config = config
         self.data_storage = {}  # 存储各股票的历史数据
         self.alerts_history = []  # 存储历史警报
-        self.initialize_data_storage()
         self.manual_data_queue = []  # 存储手动输入的数据
+        self.last_update_time = {}  # 记录每个股票的最后更新时间
+        self.initialize_data_storage()
 
         # 设置Tushare Token
         ts.set_token(config["TUSHARE_TOKEN"])
         self.pro = ts.pro_api()
-
-        # 加载历史数据初始化存储
-        self.load_his_data()  # 添加这行代码
 
         # 创建锁用于线程安全
         self.lock = threading.Lock()
@@ -54,201 +56,181 @@ class StockMonitor:
         else:
             print("调试模式已启用，监控线程未启动。使用手动触发功能进行测试。")
 
-    def load_his_data(self):
-        """使用历史分钟数据初始化数据存储"""
-        print("开始加载历史数据初始化存储...")
-
-        # 在调试模式下使用最近日期，避免非交易日错误
-        if self.config["DEBUG_MODE"]:
-            today = datetime.now().strftime("%Y%m%d")
-            current_time = datetime.now().strftime("%H:%M:%S")
-        else:
-            today = datetime.now().strftime("%Y%m%d")
-            current_time = datetime.now().strftime("%H:%M:%S")
-
-        for stock in self.config["MONITOR_STOCKS"]:
-            print(f"加载 {stock} 的历史数据...")
-
-            try:
-                # 获取1分钟历史数据
-                df_1min = ts.pro_bar(ts_code=stock,
-                                     freq='1min',
-                                     start_date=start_day + " 09:30:00",
-                                     end_date=today + " " + current_time,
-                                     limit=self.config["DATA_RETENTION"])
-
-                if df_1min is not None and not df_1min.empty:
-                    # 按时间顺序排序（从旧到新）
-                    df_1min = df_1min.sort_values('trade_time', ascending=True)
-
-                    for _, row in df_1min.iterrows():
-                        candle_data = {
-                            'time': row['trade_time'],
-                            'open': row['open'],
-                            'close': row['close'],
-                            'vol': row['vol']
-                        }
-                        self.data_storage[stock]["1min"]["candles"].append(candle_data)
-
-                # 获取5分钟历史数据
-                # 计算需要的5分钟数据条数
-                five_min_count = max(1, self.config["DATA_RETENTION"] // 5)
-                df_5min = ts.pro_bar(ts_code=stock,
-                                     freq='5min',
-                                     start_date=start_day + " 09:30:00",
-                                     end_date=today + " " + current_time,
-                                     limit=five_min_count)
-
-                if df_5min is not None and not df_5min.empty:
-                    # 按时间顺序排序（从旧到新）
-                    df_5min = df_5min.sort_values('trade_time', ascending=True)
-
-                    for _, row in df_5min.iterrows():
-                        candle_data = {
-                            'time': row['trade_time'],
-                            'open': row['open'],
-                            'close': row['close'],
-                            'vol': row['vol']
-                        }
-                        self.data_storage[stock]["5min"]["candles"].append(candle_data)
-
-                print(
-                    f"  {stock} 加载完成: 1min={len(self.data_storage[stock]['1min']['candles'])}, 5min={len(self.data_storage[stock]['5min']['candles'])}")
-
-            except Exception as e:
-                print(f"  加载 {stock} 历史数据失败: {str(e)}")
-
-        print("历史数据初始化完成")
-
     def initialize_data_storage(self):
-        """初始化数据存储结构"""
-        for stock in self.config["MONITOR_STOCKS"]:
-            self.data_storage[stock] = {
-                "1min": {
-                    # 使用candles列表存储K线数据，每个元素是一个字典
-                    "candles": deque(maxlen=self.config["DATA_RETENTION"])
-                },
-                "5min": {
-                    "candles": deque(maxlen=self.config["DATA_RETENTION"] // 5)
-                }
+        """初始化数据存储结构 - 使用数组代替deque"""
+        # 计算基础数据保留数量
+        base_retention = self.config["DATA_RETENTION_HOURS"] * 3600 // self.config["BASE_INTERVAL"]
+
+        for stock, config in self.config["MONITOR_STOCKS"].items():
+            self.data_storage[stock] = {}
+            self.last_update_time[stock] = datetime.now()
+
+            # 基础数据（最高频率）
+            self.data_storage[stock]["base"] = {
+                "candles": [],  # 使用数组代替deque
+                "maxlen": base_retention,
+                "interval": self.config["BASE_INTERVAL"]
             }
+
+    def _add_to_array(self, array, item, maxlen):
+        """向数组添加元素，保持数组长度不超过maxlen"""
+        array.append(item)
+        if len(array) > maxlen:
+            # 移除最旧的元素
+            return array[1:]
+        return array
 
     def fetch_realtime_data(self):
         """获取实时行情数据"""
         if self.config["DEBUG_MODE"]:
             return self.get_manual_data()
         else:
-            return IndexAnalysis.realtime_quote(ts_code=",".join(self.config["MONITOR_STOCKS"]))
+            stock_codes = list(self.config["MONITOR_STOCKS"].keys())
+            return IndexAnalysis.realtime_quote(ts_code=",".join(stock_codes))
 
-    def update_data_storage(self, min_list):
-        """更新数据存储"""
-        if len(min_list) == 0:
+    def update_data_storage(self, data_list):
+        """更新数据存储 - 使用数组代替deque"""
+        if len(data_list) == 0:
             return
 
         current_time = datetime.now()
 
         with self.lock:
-            for row in min_list:
+            for row in data_list:
                 stock = row.ts_code
                 if stock not in self.data_storage:
                     continue
 
-                # 更新1分钟数据 - 使用新的字典结构
+                # 更新基础数据
                 candle_data = {
-                    'time': row.time,
-                    'open': row.open,  # 添加开盘价
+                    'timestamp': current_time,
+                    'open': row.open,
+                    'high': getattr(row, 'high', row.open),
+                    'price': getattr(row, 'price', row.price),
+                    'low': getattr(row, 'low', row.open),
                     'close': row.close,
                     'vol': row.vol
                 }
-                self.data_storage[stock]["1min"]["candles"].append(candle_data)
 
-                # 每5分钟更新一次5分钟数据
-                if current_time.minute % 5 == 0 and current_time.second < 10:
-                    if self.data_storage[stock]["1min"]["candles"]:
-                        # 获取最近5根1分钟K线
-                        last_five = list(self.data_storage[stock]["1min"]["candles"])[-5:]
+                # 使用数组代替deque
+                base_data = self.data_storage[stock]["base"]
+                base_data["candles"] = self._add_to_array(
+                    base_data["candles"], candle_data, base_data["maxlen"]
+                )
 
-                        # 计算5分钟K线的开盘价（第一个1分钟K线的开盘价）
-                        five_min_open = last_five[0]['open'] if last_five else row.close
-                        # 计算5分钟K线的收盘价（最后一个1分钟K线的收盘价）
-                        five_min_close = last_five[-1]['close'] if last_five else row.close
-                        # 计算5分钟成交量（5根1分钟K线成交量之和）
-                        five_min_vol = sum(candle['vol'] for candle in last_five) if last_five else row.vol
+                # 更新最后更新时间
+                self.last_update_time[stock] = current_time
 
-                        # 创建5分钟K线数据
-                        five_min_candle = {
-                            'time': current_time.strftime("%Y-%m-%d %H:%M:%S"),
-                            'open': five_min_open,
-                            'close': five_min_close,
-                            'vol': five_min_vol
-                        }
-                        self.data_storage[stock]["5min"]["candles"].append(five_min_candle)
-
-    ############################################################
-    # 重构后的检测方法，支持多种警报条件的灵活扩展
-    ############################################################
-
-    def check_alert_conditions(self, stock, timeframe):
+    def check_alert_conditions(self, stock, window_sec):
         """
-        检查所有警报条件
-        返回: 满足的警报条件列表 (空列表表示没有警报)
+        检查指定时间窗口的警报条件
+        返回: 满足的警报条件列表
         """
         triggered_conditions = []
-
-        # 获取最近的K线数据
-        candles = self.data_storage[stock][timeframe]["candles"]
-        if len(candles) < 2:
-            return triggered_conditions
-
-        current_candle = candles[-1]
-        previous_candle = candles[-2]
-
+        candles = self.data_storage[stock]["base"]["candles"]
         # 获取阈值配置
-        thresholds = self.config["ALERT_THRESHOLDS"][timeframe]
-
+        thresholds = self.config["MONITOR_STOCKS"][stock]["thresholds"].get(window_sec, {})
         # 检查各个警报条件
-        if self._check_volume_spike(current_candle, previous_candle, thresholds):
+        if self._check_volume_spike(candles, thresholds):
             triggered_conditions.append("volume_spike")
 
-        if self._check_price_drop(current_candle, previous_candle, thresholds):
+        if self._check_price_movement(candles, self.config["MONITOR_STOCKS"][stock]):
             triggered_conditions.append("price_drop")
-
-        # 在这里可以添加更多的检测条件
-        # 例如:
-        # if self._check_rsi_oversold(stock, timeframe):
-        #     triggered_conditions.append("rsi_oversold")
-        #
-        # if self._check_macd_crossover(stock, timeframe):
-        #     triggered_conditions.append("macd_crossover")
 
         return triggered_conditions
 
-    def _check_volume_spike(self, current_candle, previous_candle, thresholds):
-        """检测成交量激增"""
-        if previous_candle['vol'] > 0:
-            volume_ratio = current_candle['vol'] / previous_candle['vol']
-            return volume_ratio > thresholds.get("volume_ratio", 1.0)
+    def _check_volume_spike(self, candles, thresholds):
+
         return False
 
-    def _check_price_drop(self, current_candle, previous_candle, thresholds):
-        """检测价格下跌"""
-        price_change_pct = (current_candle['close'] - previous_candle['close']) / previous_candle['close'] * 100
-        return price_change_pct < thresholds.get("price_change", 0.0)
+    def _check_price_movement(self, price_array, thresholds_config):
+        """
+        检测价格异动 - 遍历所有配置的时间窗口阈值
 
+        参数:
+            price_array: 价格数据数组，每个元素包含'price'价格
+            thresholds_config: 阈值配置字典，包含多个时间窗口的阈值
 
-    def send_alert(self, stock, timeframe, conditions):
+        返回:
+            list: 触发的价格警报列表
+        """
+        triggered_alerts = []
+
+        if len(price_array) == 0:
+            return triggered_alerts
+
+        # 遍历所有配置的时间窗口阈值
+        for window_sec, thresholds in thresholds_config['thresholds'].items():
+            # 将窗口秒数转换为数据点数量
+            window_length = window_sec // self.config["BASE_INTERVAL"]
+
+            # 获取最近window_length个数据点
+            recent_prices = price_array[-window_length:]
+
+            # 提取价格
+            prices = [candle['price'] for candle in recent_prices]
+
+            # 计算窗口内的最高价和最低价
+            highest_price = max(prices)
+            lowest_price = min(prices)
+            current_price = prices[-1]
+
+            # 计算从最高点的回撤幅度
+            drawdown_from_high = (current_price - highest_price) / highest_price * 100
+
+            # 计算从最低点的上涨幅度
+            gain_from_low = (current_price - lowest_price) / lowest_price * 100
+
+            # 获取阈值配置
+            drop_threshold = thresholds.get("price_change", 0.0)  # 下跌阈值（通常为负值）
+            rise_threshold = abs(drop_threshold)  # 上涨阈值（取下跌阈值的绝对值）
+
+            # 检测下跌异动（从高点回撤超过阈值）
+            if drawdown_from_high < drop_threshold:
+                # 将秒转换为更易读的时间单位
+                if window_sec < 60:
+                    window_str = f"{window_sec}秒"
+                elif window_sec < 3600:
+                    window_str = f"{window_sec // 60}分钟"
+                else:
+                    window_str = f"{window_sec // 3600}小时"
+
+                triggered_alerts.append(f"price_drop_{window_str}")
+
+            # 检测上涨异动（从低点上涨超过阈值）
+            if gain_from_low > rise_threshold:
+                # 将秒转换为更易读的时间单位
+                if window_sec < 60:
+                    window_str = f"{window_sec}秒"
+                elif window_sec < 3600:
+                    window_str = f"{window_sec // 60}分钟"
+                else:
+                    window_str = f"{window_sec // 3600}小时"
+
+                triggered_alerts.append(f"price_rise_{window_str}")
+
+        return triggered_alerts
+
+    def send_alert(self, stock, window_sec, conditions):
         """发送警报通知"""
         condition_names = {
             "volume_spike": "成交量激增",
             "price_drop": "价格下跌",
-            # 添加其他条件的描述
         }
 
         # 将条件代码转换为可读名称
         readable_conditions = [condition_names.get(c, c) for c in conditions]
         conditions_str = "、".join(readable_conditions)
 
-        alert_info = f"{self.get_stock_name(stock)} {timeframe} {conditions_str}警报 {datetime.now().strftime('%H:%M:%S')}"
+        # 将秒转换为更易读的时间单位
+        if window_sec < 60:
+            window_str = f"{window_sec}秒"
+        elif window_sec < 3600:
+            window_str = f"{window_sec // 60}分钟"
+        else:
+            window_str = f"{window_sec // 3600}小时"
+
+        alert_info = f"{self.get_stock_name(stock)} {window_str}窗口 {conditions_str}警报 {datetime.now().strftime('%H:%M:%S')}"
         self.alerts_history.append(alert_info)
 
         if self.config["DEBUG_MODE"]:
@@ -257,55 +239,14 @@ class StockMonitor:
             send_dingtalk_message("分时监控", alert_info)
 
     def get_stock_name(self, stock_code):
-        """获取股票名称"""
+
+        # 如果缓存中没有，调用Tushare API获取
         try:
-            # 这里可以使用Tushare的stock_basic接口获取股票名称
-            # 简化处理：使用一个映射表
-            return result['000001.SZ']['name']
-        except:
-            return stock_code
+            return result_dict[stock_code]['name']
 
-    def visualize_data(self, stock):
-        """可视化股票数据"""
-        if stock not in self.data_storage:
-            print(f"没有 {stock} 的数据")
-            return
-
-        plt.figure(figsize=(14, 10))
-
-        # 1分钟K线图
-        plt.subplot(2, 1, 1)
-        candles = list(self.data_storage[stock]["1min"]["candles"])
-        times = [candle['time'] for candle in candles]
-        closes = [candle['close'] for candle in candles]
-        opens = [candle['open'] for candle in candles]  # 使用开盘价
-
-        if len(times) > 1 and len(closes) > 1:
-            # 绘制收盘价线
-            plt.plot(times, closes, 'b-', label='收盘价')
-            # 绘制开盘价线
-            plt.plot(times, opens, 'g--', label='开盘价')
-            plt.title(f"{self.get_stock_name(stock)} 1分钟价格走势")
-            plt.xlabel("时间")
-            plt.ylabel("价格")
-            plt.grid(True)
-            plt.legend()
-
-        # 成交量图
-        plt.subplot(2, 1, 2)
-        vols = [candle['vol'] for candle in candles]
-
-        if len(times) > 1 and len(vols) > 1:
-            plt.bar(times, vols, color='g', alpha=0.7, label='成交量')
-            plt.title(f"{self.get_stock_name(stock)} 1分钟成交量")
-            plt.xlabel("时间")
-            plt.ylabel("成交量(股)")
-            plt.grid(True)
-            plt.legend()
-
-        plt.tight_layout()
-        plt.savefig(f"{stock}_monitor.png")
-        print(f"已保存 {stock} 监控图表")
+        except Exception as e:
+            print(f"获取股票名称失败: {e}")
+            return stock_code  # 出错时返回股票代码
 
     def start_monitoring(self):
         """开始监控"""
@@ -314,16 +255,16 @@ class StockMonitor:
 
         while True:
             try:
-                min_list = self.fetch_realtime_data()
-                if len(min_list) != 0:
-                    self.update_data_storage(min_list)
-                    for stock in self.config["MONITOR_STOCKS"]:
-                        for timeframe in ["1min", "5min"]:
+                data_list = self.fetch_realtime_data()
+                if len(data_list) != 0:
+                    self.update_data_storage(data_list)
+                    for stock in self.config["MONITOR_STOCKS"].keys():
+                        for window_sec in self.config["MONITOR_STOCKS"][stock]["windows_sec"]:
                             # 使用重构后的检测方法
-                            conditions = self.check_alert_conditions(stock, timeframe)
+                            conditions = self.check_alert_conditions(stock, window_sec)
                             if conditions:
-                                self.send_alert(stock, timeframe, conditions)
-                time.sleep(self.config["MONITOR_INTERVAL"])
+                                self.send_alert(stock, window_sec, conditions)
+                time.sleep(self.config["BASE_INTERVAL"])
             except KeyboardInterrupt:
                 print("\n监控已停止")
                 break
@@ -331,15 +272,20 @@ class StockMonitor:
     def input_manual_data(self):
         """手动输入股票数据"""
         print("\n===== 手动输入数据 =====")
-        for stock in self.config["MONITOR_STOCKS"]:
+        for stock in self.config["MONITOR_STOCKS"].keys():
             stock_name = self.get_stock_name(stock)
             print(f"输入 {stock_name}({stock}) 的数据:")
 
             time_str = input("  时间(格式YYYY-MM-DD HH:MM:SS，直接回车使用当前时间): ")
             if not time_str:
-                time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                timestamp = datetime.now()
+            else:
+                timestamp = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
 
             open_price = float(input("  开盘价: "))
+            high_price = float(input("  最高价: "))
+            price = float(input("  当前价: "))
+            low_price = float(input("  最低价: "))
             close_price = float(input("  收盘价: "))
             volume = int(input("  成交量(股): "))
 
@@ -347,14 +293,17 @@ class StockMonitor:
             data_point = pd.Series({
                 'ts_code': stock,
                 'open': open_price,
+                'high': high_price,
+                'price': price,
+                'low': low_price,
                 'close': close_price,
                 'vol': volume,
-                'time': time_str
+                'time': timestamp.strftime("%Y-%m-%d %H:%M:%S")
             })
 
             self.manual_data_queue.append(data_point)
+            self.update_data_storage(self.get_manual_data())
             print(f"已添加 {stock} 的数据到队列")
-        print("=" * 30)
 
     def get_manual_data(self):
         """从手动输入队列获取数据"""
@@ -369,33 +318,24 @@ class StockMonitor:
         """手动触发检测"""
         print("\n===== 手动触发检测 =====")
 
-        # 如果队列为空，提示输入数据
-        if not self.manual_data_queue:
-            print("手动数据队列为空，请先输入数据")
-            self.input_manual_data()
-
-        # 获取并处理手动数据
-        min_list = self.get_manual_data()
-        if min_list:
-            self.update_data_storage(min_list)
-
-            # 执行检测
-            for stock in self.config["MONITOR_STOCKS"]:
-                for timeframe in ["1min", "5min"]:
-                    # 使用重构后的检测方法
-                    conditions = self.check_alert_conditions(stock, timeframe)
-                    if conditions:
-                        print(f"检测到警报条件: {stock} {timeframe} - {', '.join(conditions)}")
-                        self.send_alert(stock, timeframe, conditions)
-                    else:
-                        print(f"未检测到警报条件: {stock} {timeframe}")
+        # 执行检测
+        for stock in self.config["MONITOR_STOCKS"].keys():
+            for window_sec in self.config["MONITOR_STOCKS"][stock]["windows_sec"]:
+                # 使用重构后的检测方法
+                conditions = self.check_alert_conditions(stock, window_sec)
+                if conditions:
+                    print(f"检测到警报条件: {stock} {window_sec}秒 - {', '.join(conditions)}")
+                    self.send_alert(stock, window_sec, conditions)
+                else:
+                    print(f"未检测到警报条件: {stock} {window_sec}秒")
 
         # 显示最新数据
-        for stock in self.config["MONITOR_STOCKS"]:
-            if self.data_storage[stock]["1min"]["candles"]:
-                last_candle = self.data_storage[stock]["1min"]["candles"][-1]
+        for stock in self.config["MONITOR_STOCKS"].keys():
+            if self.data_storage[stock]["base"]["candles"]:
+                last_candle = self.data_storage[stock]["base"]["candles"][-1]
                 print(
-                    f"{stock} 最新数据: 时间={last_candle['time']}, 收盘价={last_candle['close']:.2f}, 成交量={last_candle['vol']}")
+                    f"{stock} 最新数据: 时间={last_candle['timestamp'].strftime('%H:%M:%S')}, "
+                    f"收盘价={last_candle['close']:.2f}, 成交量={last_candle['vol']}")
 
         print("=" * 30)
 
@@ -406,9 +346,8 @@ class StockMonitor:
             print("1. 手动输入数据")
             print("2. 手动触发检测")
             print("3. 显示数据存储状态")
-            print("4. 可视化股票数据")
-            print("5. 显示警报历史")
-            print("6. 退出")
+            print("4. 显示警报历史")
+            print("5. 退出")
 
             choice = input("请选择操作: ")
 
@@ -419,11 +358,8 @@ class StockMonitor:
             elif choice == "3":
                 self.display_data_storage()
             elif choice == "4":
-                stock = input("输入股票代码(如600000.SH): ")
-                self.visualize_data(stock)
-            elif choice == "5":
                 self.display_alert_history()
-            elif choice == "6":
+            elif choice == "5":
                 print("退出调试菜单")
                 break
             else:
@@ -432,16 +368,30 @@ class StockMonitor:
     def display_data_storage(self):
         """显示数据存储状态"""
         print("\n数据存储状态:")
-        for stock, timeframes in self.data_storage.items():
+        for stock, windows in self.data_storage.items():
             print(f"{self.get_stock_name(stock)}:")
-            for timeframe, data in timeframes.items():
+            for window_sec, data in windows.items():
                 count = len(data["candles"])
                 if count > 0:
                     last_candle = data["candles"][-1]
-                    print(f"  {timeframe}: {count}条数据, 最新: {last_candle['time']} "
+                    # 将秒转换为更易读的时间单位
+                    if window_sec == "base":
+                        window_str = f"基础({data['interval']}秒)"
+                    elif window_sec < 60:
+                        window_str = f"{window_sec}秒"
+                    elif window_sec < 3600:
+                        window_str = f"{window_sec // 60}分钟"
+                    else:
+                        window_str = f"{window_sec // 3600}小时"
+
+                    print(f"  {window_str}: {count}条数据, 最新: {last_candle['timestamp'].strftime('%H:%M:%S')} "
                           f"收盘价={last_candle['close']:.2f} 成交量={last_candle['vol']}")
                 else:
-                    print(f"  {timeframe}: 无数据")
+                    if window_sec == "base":
+                        window_str = f"基础({data['interval']}秒)"
+                    else:
+                        window_str = f"{window_sec}秒"
+                    print(f"  {window_str}: 无数据")
 
     def display_alert_history(self):
         """显示警报历史"""
@@ -467,5 +417,3 @@ if __name__ == "__main__":
                 time.sleep(1)
         except KeyboardInterrupt:
             print("程序已退出")
-            for stock in CONFIG["MONITOR_STOCKS"]:
-                monitor.visualize_data(stock)
