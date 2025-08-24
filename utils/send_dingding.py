@@ -52,7 +52,7 @@ def generate_stock_image_url(stock_code: str) -> str:
     sina_code = f"{exchange_part.lower()}{code_part}"
 
     # 生成 URL
-    return f"http://image.sinajs.cn/newchart/daily/n/{sina_code}.png?t={random.randint(0, 99999)}"
+    return f"http://image.sinajs.cn/newchart/min/n/{sina_code}.png?t={random.randint(0, 99999)}"
 
 
 
