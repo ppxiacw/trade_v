@@ -34,9 +34,6 @@ try:
     # 创建以ts_code为键的字典
     result_dict = {record['ts_code']: record for record in records}
 
-    # 美化输出
-    pretty_json = json.dumps(result_dict, indent=4, ensure_ascii=False)
-
 
 except Exception as e:
     print(f"发生错误: {str(e)}")

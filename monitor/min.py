@@ -68,7 +68,7 @@ CONFIG = {
     "MONITOR_STOCKS": load_monitor_stocks_config(),  # 从JSON文件加载
     "BASE_INTERVAL": 1,  # 基础数据收集间隔(秒)
     "DATA_RETENTION_HOURS": 10,  # 保留多少小时的数据
-    "DEBUG_MODE": False  # 调试模式开关
+    "DEBUG_MODE": True  # 调试模式开关
 }
 
 
