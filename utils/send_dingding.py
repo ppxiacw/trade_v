@@ -57,4 +57,4 @@ def generate_stock_image_url(stock_code: str) -> str:
 
 
 
-send_dingtalk_message('00001','000001.SH')
+# send_dingtalk_message('00001','000001.SH')

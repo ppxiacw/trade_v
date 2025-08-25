@@ -306,6 +306,7 @@ class StockMonitor:
         while True:
             try:
                 data_list = self.fetch_realtime_data()
+                print(str(data_list))
                 if len(data_list) != 0:
                     self.update_data_storage(data_list)
                     for stock in self.config["MONITOR_STOCKS"].keys():
