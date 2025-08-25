@@ -23,7 +23,7 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
         }
     }
     print(str(data))
-    response = requests.post(webhook_url, headers=headers, json=data)
+    response = requests.post(webhook_url, headers=headers, json=data,verify=False)
 
     if response.status_code == 200:
         print("消息发送成功")
@@ -57,4 +57,4 @@ def generate_stock_image_url(stock_code: str) -> str:
 
 
 
-# send_dingtalk_message('00001','http://image.sinajs.cn/newchart/daily/n/sh600000.png')
+send_dingtalk_message('00001','000001.SH')
