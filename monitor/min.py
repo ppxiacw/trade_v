@@ -31,6 +31,10 @@ def load_monitor_stocks_config():
                         thresholds[str(window_sec)] = threshold_config
                     stock_config["thresholds"] = thresholds
 
+                    # 从thresholds的key中生成windows_sec
+                    if "windows_sec" not in stock_config:
+                        stock_config["windows_sec"] = [int(sec) for sec in stock_config["thresholds"].keys()]
+
             return config
     except FileNotFoundError:
         print("警告: monitor_stocks.json 文件未找到，使用默认配置")
@@ -284,7 +288,7 @@ class StockMonitor:
         if self.config["DEBUG_MODE"]:
             print(f"[DEBUG] 警报触发: {alert_info}")
         else:
-            send_dingtalk_message(alert_info,stock)
+            send_dingtalk_message(alert_info, stock)
 
     def get_stock_name(self, stock_code):
         # 如果缓存中没有，调用Tushare API获取
@@ -427,6 +431,10 @@ class StockMonitor:
                     for window_sec, threshold_config in stock_config["thresholds"].items():
                         thresholds[str(window_sec)] = threshold_config
                     stock_config["thresholds"] = thresholds
+
+                    # 从thresholds的key中生成windows_sec
+                    if "windows_sec" not in stock_config:
+                        stock_config["windows_sec"] = [int(sec) for sec in stock_config["thresholds"].keys()]
 
             self.config["MONITOR_STOCKS"] = new_config
             self.initialize_data_storage()  # 重新初始化数据存储
