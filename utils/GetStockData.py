@@ -16,7 +16,7 @@ try:
 
     # 获取市值数据
     df_daily = pro.daily_basic(
-        trade_date=Date_utils.get_today(replace=True),
+        trade_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=True),-1),
         fields='ts_code,close,total_mv',
         limit=6000  # 关键：指定获取数据量
     )
@@ -33,7 +33,6 @@ try:
 
     # 创建以ts_code为键的字典
     result_dict = {record['ts_code']: record for record in records}
-
 
 except Exception as e:
     print(f"发生错误: {str(e)}")

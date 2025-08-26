@@ -11,6 +11,8 @@ from utils.date_utils import Date_utils
 from utils.GetStockData import result_dict
 from utils.send_dingding import send_dingtalk_message
 from dto.StockDataDay import StockDataDay
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 stockAnalysis = Date_utils()
 start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replace('-', '')
@@ -68,7 +70,7 @@ CONFIG = {
     "MONITOR_STOCKS": load_monitor_stocks_config(),  # 从JSON文件加载
     "BASE_INTERVAL": 1,  # 基础数据收集间隔(秒)
     "DATA_RETENTION_HOURS": 10,  # 保留多少小时的数据
-    "DEBUG_MODE": True  # 调试模式开关
+    "DEBUG_MODE": False  # 调试模式开关
 }
 
 
@@ -306,7 +308,6 @@ class StockMonitor:
         while True:
             try:
                 data_list = self.fetch_realtime_data()
-                print(str(data_list))
                 if len(data_list) != 0:
                     self.update_data_storage(data_list)
                     for stock in self.config["MONITOR_STOCKS"].keys():
