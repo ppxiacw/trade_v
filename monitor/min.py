@@ -12,6 +12,7 @@ from utils.GetStockData import result_dict
 from utils.send_dingding import send_dingtalk_message
 from dto.StockDataDay import StockDataDay
 import urllib3
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 stockAnalysis = Date_utils()
@@ -70,7 +71,8 @@ CONFIG = {
     "MONITOR_STOCKS": load_monitor_stocks_config(),  # 从JSON文件加载
     "BASE_INTERVAL": 1,  # 基础数据收集间隔(秒)
     "DATA_RETENTION_HOURS": 10,  # 保留多少小时的数据
-    "DEBUG_MODE": False  # 调试模式开关
+    "DEBUG_MODE": False,  # 调试模式开关
+    "ALERT_COOLDOWN": 300  # 警报冷却时间（秒），5分钟内不重复发送相同警报
 }
 
 
@@ -82,6 +84,7 @@ class StockMonitor:
         self.alerts_history = []  # 存储历史警报
         self.manual_data_queue = []  # 存储手动输入的数据
         self.last_update_time = {}  # 记录每个股票的最后更新时间
+        self.last_alert_time = {}  # 记录每个股票每种警报类型的最后触发时间
         self.initialize_data_storage()
 
         # 设置Tushare Token
@@ -106,6 +109,7 @@ class StockMonitor:
         for stock, config in self.config["MONITOR_STOCKS"].items():
             self.data_storage[stock] = {}
             self.last_update_time[stock] = datetime.now()
+            self.last_alert_time[stock] = {}  # 初始化警报时间记录
 
             # 基础数据（最高频率）
             self.data_storage[stock]["base"] = {
@@ -230,41 +234,45 @@ class StockMonitor:
         price_drop_thresholds = thresholds.get("price_drop", [])
         for threshold in price_drop_thresholds:
             if drawdown_from_high <= threshold:  # 注意：drawdown_from_high是负值，所以使用<=
-                # 将秒转换为更易读的时间单位
-                if window_sec < 60:
-                    window_str = f"{window_sec}秒"
-                elif window_sec < 3600:
-                    window_str = f"{window_sec // 60}分钟"
-                else:
-                    window_str = f"{window_sec // 3600}小时"
-
-                triggered_alerts.append(f"price_drop_{abs(threshold)}%_{window_str}")
+                alert_type = f"price_drop_{abs(threshold)}%_{window_sec}s"
+                triggered_alerts.append(alert_type)
 
         # 检查上涨阈值
         price_rise_thresholds = thresholds.get("price_rise", [])
         for threshold in price_rise_thresholds:
             if gain_from_low >= threshold:
-                # 将秒转换为更易读的时间单位
-                if window_sec < 60:
-                    window_str = f"{window_sec}秒"
-                elif window_sec < 3600:
-                    window_str = f"{window_sec // 60}分钟"
-                else:
-                    window_str = f"{window_sec // 3600}小时"
-
-                triggered_alerts.append(f"price_rise_{threshold}%_{window_str}")
+                alert_type = f"price_rise_{threshold}%_{window_sec}s"
+                triggered_alerts.append(alert_type)
 
         return triggered_alerts
 
     def send_alert(self, stock, window_sec, conditions):
         """发送警报通知"""
+        current_time = datetime.now()
+
+        # 检查冷却时间
+        valid_conditions = []
+        for condition in conditions:
+            # 获取该股票该类型警报的最后触发时间
+            last_trigger_time = self.last_alert_time[stock].get(condition)
+
+            # 如果从未触发过，或者超过了冷却时间，则允许触发
+            if last_trigger_time is None or \
+                    (current_time - last_trigger_time).total_seconds() > self.config["ALERT_COOLDOWN"]:
+                valid_conditions.append(condition)
+                # 更新最后触发时间
+                self.last_alert_time[stock][condition] = current_time
+
+        if not valid_conditions:
+            return
+
         condition_names = {
             "volume_spike": "成交量激增",
         }
 
         # 处理价格变化警报
         price_alerts = []
-        for condition in conditions:
+        for condition in valid_conditions:
             if condition.startswith("price_drop_"):
                 parts = condition.split("_")
                 if len(parts) >= 3:
@@ -284,7 +292,7 @@ class StockMonitor:
 
         conditions_str = "、".join(price_alerts)
 
-        alert_info = f"{self.get_stock_name(stock)} {conditions_str}警报 {datetime.now().strftime('%H:%M:%S')}"
+        alert_info = f"{self.get_stock_name(stock)} {conditions_str}警报 {current_time.strftime('%H:%M:%S')}"
         self.alerts_history.append(alert_info)
 
         if self.config["DEBUG_MODE"]:
@@ -321,6 +329,7 @@ class StockMonitor:
                 print("\n监控已停止")
                 break
 
+    # 其余方法保持不变...
     def input_manual_data(self):
         """从JSON文件读取股票数据"""
         print("\n===== 从JSON文件读取数据 =====")
