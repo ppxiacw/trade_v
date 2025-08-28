@@ -67,22 +67,6 @@
       }
     }
   },
-  "600356.SH": {
-    "thresholds": {
-      "60": {
-        "price_drop": [-0.3],
-        "price_rise": [0.3]
-      },
-      "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
-      },
-      "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
-      }
-    }
-  },
   "513730.SH": {
     "thresholds": {
       "60": {
@@ -100,22 +84,6 @@
     }
   },
   "601600.SH": {
-    "thresholds": {
-      "60": {
-        "price_drop": [-0.3],
-        "price_rise": [0.3]
-      },
-      "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
-      },
-      "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
-      }
-    }
-  },
-    "002668.Sz": {
     "thresholds": {
       "60": {
         "price_drop": [-0.3],

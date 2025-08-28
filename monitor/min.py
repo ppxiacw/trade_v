@@ -1,17 +1,20 @@
+from flask import Flask, request, jsonify
 import json
 import tushare as ts
 import pandas as pd
 import time
 import threading
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-import numpy as np
+from datetime import datetime
 from utils.tushare_utils import IndexAnalysis
 from utils.date_utils import Date_utils
 from utils.GetStockData import result_dict
 from utils.send_dingding import send_dingtalk_message
 from dto.StockDataDay import StockDataDay
 import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+app = Flask(__name__)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -40,26 +43,7 @@ def load_monitor_stocks_config():
 
             return config
     except FileNotFoundError:
-        print("警告: monitor_stocks.json 文件未找到，使用默认配置")
-        return {
-            "000001.SH": {  # 上证指数作为默认
-                "windows_sec": [10, 60, 600],
-                "thresholds": {
-                    "10": {
-                        "price_drop": [-0.8, -1.2, -2.0],
-                        "price_rise": [0.8, 1.2, 2.0]
-                    },
-                    "60": {
-                        "price_drop": [-1.5, -2.0, -3.0],
-                        "price_rise": [1.5, 2.0, 3.0]
-                    },
-                    "600": {
-                        "price_drop": [-2.0, -3.0, -5.0],
-                        "price_rise": [2.0, 3.0, 5.0]
-                    }
-                }
-            }
-        }
+        print("警告: monitor_stocks.json 文件未找到")
     except json.JSONDecodeError:
         print("错误: monitor_stocks.json 文件格式不正确")
         return {}
@@ -102,7 +86,6 @@ class StockMonitor:
             print("调试模式已启用，监控线程未启动。使用手动触发功能进行测试。")
 
     def initialize_data_storage(self):
-        """初始化数据存储结构 - 使用数组代替deque"""
         # 计算基础数据保留数量
         base_retention = self.config["DATA_RETENTION_HOURS"] * 3600 // self.config["BASE_INTERVAL"]
 
@@ -378,7 +361,8 @@ class StockMonitor:
     def manual_trigger_detection(self):
         """手动触发检测"""
         print("\n===== 手动触发检测 =====")
-
+        self.input_manual_data()
+        CONFIG["DEBUG_MODE"] = True  # 强制开启调试模式
         # 执行检测
         for stock in self.config["MONITOR_STOCKS"].keys():
             for window_sec in self.config["MONITOR_STOCKS"][stock]["windows_sec"]:
@@ -398,35 +382,6 @@ class StockMonitor:
                     f"收盘价={last_candle['close']:.2f}, 成交量={last_candle['vol']}")
 
         print("=" * 30)
-
-    def debug_menu(self):
-        """调试菜单"""
-        while True:
-            print("\n===== 调试菜单 =====")
-            print("1. 手动输入数据")
-            print("2. 手动触发检测")
-            print("3. 显示数据存储状态")
-            print("4. 显示警报历史")
-            print("5. 重新加载监控股票配置")
-            print("6. 退出")
-
-            choice = input("请选择操作: ")
-
-            if choice == "1":
-                self.input_manual_data()
-            elif choice == "2":
-                self.manual_trigger_detection()
-            elif choice == "3":
-                self.display_data_storage()
-            elif choice == "4":
-                self.display_alert_history()
-            elif choice == "5":
-                self.reload_monitor_stocks_config()
-            elif choice == "6":
-                print("退出调试菜单")
-                break
-            else:
-                print("无效选择，请重新输入")
 
     def reload_monitor_stocks_config(self):
         """重新加载监控股票配置"""
@@ -492,16 +447,26 @@ class StockMonitor:
             print(f"{i}. {alert}")
 
 
+@app.route('/api/alerts')
+def get_alerts():
+    return jsonify({
+        'status': 'success',
+        'alerts': monitor.display_alert_history()
+    })
+
+
+@app.route('/api/manual_trigger_detection')
+def manual_input():
+    monitor.manual_trigger_detection()
+    return "success"
+
+
+@app.route('/api/reload_config')
+def reload_config():
+    monitor.reload_monitor_stocks_config()
+    return "success"
+
 # 启动监控系统
 if __name__ == "__main__":
     monitor = StockMonitor(CONFIG)
-
-    if CONFIG["DEBUG_MODE"]:
-        print("运行在调试模式，使用调试菜单进行测试")
-        monitor.debug_menu()
-    else:
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("程序已退出")
+    app.run(host='0.0.0.0', port=5000, debug=CONFIG["DEBUG_MODE"])
