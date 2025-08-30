@@ -19,38 +19,6 @@
       }
     }
   },
-  "603406.SH": {
-    "thresholds": {
-      "60": {
-        "price_drop": [-0.3],
-        "price_rise": [0.3]
-      },
-      "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
-      },
-      "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
-      }
-    }
-  },
-  "603007.SH": {
-    "thresholds": {
-      "60": {
-        "price_drop": [-0.3],
-        "price_rise": [0.3]
-      },
-      "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
-      },
-      "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
-      }
-    }
-  },
   "601933.SH": {
     "thresholds": {
       "60": {
@@ -67,7 +35,7 @@
       }
     }
   },
-  "513730.SH": {
+  "513000.SH": {
     "thresholds": {
       "60": {
         "price_drop": [-0.3],
@@ -83,7 +51,7 @@
       }
     }
   },
-  "601600.SH": {
+  "002594.SZ": {
     "thresholds": {
       "60": {
         "price_drop": [-0.3],

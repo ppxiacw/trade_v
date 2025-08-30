@@ -1,3 +1,5 @@
+import os
+
 from flask import Flask, request, jsonify
 import json
 import tushare as ts
@@ -25,7 +27,11 @@ start_day = stockAnalysis.get_date_by_step(stockAnalysis.get_today(), -1).replac
 # 加载监控股票配置
 def load_monitor_stocks_config():
     try:
-        with open('monitor_stocks.json', 'r', encoding='utf-8') as f:
+        # 获取当前脚本所在的目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(current_dir, 'monitor_stocks.json')
+
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
 
             # 确保阈值配置中的键是字符串（JSON中的键可能是字符串）
@@ -466,7 +472,9 @@ def reload_config():
     monitor.reload_monitor_stocks_config()
     return "success"
 
+
 # 启动监控系统
 if __name__ == "__main__":
+    print(111)
     monitor = StockMonitor(CONFIG)
-    app.run(host='0.0.0.0', port=5000, debug=CONFIG["DEBUG_MODE"])
+    app.run(host='0.0.0.0', port=5000)
