@@ -72,7 +72,7 @@ class StockDataDay:
             pre_close=float(df['pre_close']) if not pd.isna(df.get('pre_close')) else None,
             change=float(df['change']) if not pd.isna(df.get('change')) else None,
             pct_chg=float(df['change_pct']) if not pd.isna(df.get('change_pct')) else None,
-            vol=int(df['volume']) if not pd.isna(df.get('volume')) else None,
+            vol=int(df['vol']) if not pd.isna(df.get('vol')) else None,
             amount=float(df['amount']) if not pd.isna(df.get('amount')) else None
         )
 
