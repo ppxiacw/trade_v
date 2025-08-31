@@ -47,6 +47,14 @@ def load_monitor_stocks_config():
                     if "windows_sec" not in stock_config:
                         stock_config["windows_sec"] = [int(sec) for sec in stock_config["thresholds"].keys()]
 
+                # 确保price_thresholds存在，如果没有则初始化为空列表
+                if "price_thresholds" not in stock_config:
+                    stock_config["price_thresholds"] = []
+
+                # 确保change_thresholds存在，如果没有则初始化为空列表
+                if "change_thresholds" not in stock_config:
+                    stock_config["change_thresholds"] = []
+
             return config
     except FileNotFoundError:
         print("警告: monitor_stocks.json 文件未找到")
@@ -75,6 +83,8 @@ class StockMonitor:
         self.manual_data_queue = []  # 存储手动输入的数据
         self.last_update_time = {}  # 记录每个股票的最后更新时间
         self.last_alert_time = {}  # 记录每个股票每种警报类型的最后触发时间
+        self.price_threshold_alerted = {}  # 记录价格阈值是否已触发过
+        self.change_threshold_alerted = {}  # 记录涨跌幅阈值是否已触发过
         self.initialize_data_storage()
 
         # 设置Tushare Token
@@ -99,6 +109,8 @@ class StockMonitor:
             self.data_storage[stock] = {}
             self.last_update_time[stock] = datetime.now()
             self.last_alert_time[stock] = {}  # 初始化警报时间记录
+            self.price_threshold_alerted[stock] = {}  # 初始化价格阈值警报记录
+            self.change_threshold_alerted[stock] = {}  # 初始化涨跌幅阈值警报记录
 
             # 基础数据（最高频率）
             self.data_storage[stock]["base"] = {
@@ -133,8 +145,6 @@ class StockMonitor:
         with self.lock:
             for row in data_list:
                 stock = row.ts_code
-                # if stock not in self.data_storage:
-                #     continue
 
                 # 更新基础数据
                 candle_data = {
@@ -143,7 +153,8 @@ class StockMonitor:
                     'high': getattr(row, 'high', row.high),
                     'low': getattr(row, 'low', row.low),
                     'close': row.close,
-                    'vol': row.vol
+                    'vol': row.vol,
+                    'pre_close': getattr(row, 'pre_close', 0)  # 添加昨收价格
                 }
 
                 # 使用数组代替deque
@@ -224,6 +235,7 @@ class StockMonitor:
             })
 
         return klines
+
     def check_alert_conditions(self, stock, window_sec):
         """
         检查指定时间窗口的警报条件
@@ -231,22 +243,30 @@ class StockMonitor:
         """
         triggered_conditions = []
         candles = self.data_storage[stock]["base"]["candles"]
+
         # 获取阈值配置
         window_str = str(window_sec)
         thresholds = self.config["MONITOR_STOCKS"][stock]["thresholds"].get(window_str, {})
 
         # 检查各个警报条件
-        if self._check_volume_spike(candles, thresholds,stock):
+        if self._check_volume_spike(candles, thresholds, stock):
             triggered_conditions.append("volume_spike")
 
         price_alerts = self._check_price_movement(candles, window_sec, self.config["MONITOR_STOCKS"][stock])
         triggered_conditions.extend(price_alerts)
 
+        # 检查价格阈值条件
+        price_threshold_alerts = self._check_price_thresholds(stock)
+        triggered_conditions.extend(price_threshold_alerts)
+
+        # 检查涨跌幅阈值条件
+        change_threshold_alerts = self._check_change_thresholds(stock)
+        triggered_conditions.extend(change_threshold_alerts)
+
         return triggered_conditions
 
-    def _check_volume_spike(self, candles, thresholds,stock):
-        five_min_klines = monitor.get_kline_data_by_window(stock, 6)
-
+    def _check_volume_spike(self, candles, thresholds, stock):
+        five_min_klines = self.get_kline_data_by_window(stock, 3)  # 5分钟窗口
         return False
 
     def _check_price_movement(self, price_array, window_sec, thresholds_config):
@@ -303,6 +323,105 @@ class StockMonitor:
             if gain_from_low >= threshold:
                 alert_type = f"price_rise_{threshold}%_{window_sec}s"
                 triggered_alerts.append(alert_type)
+
+        return triggered_alerts
+
+    def _check_price_thresholds(self, stock):
+        """
+        检查价格是否达到配置的阈值
+        参数:
+            stock: 股票代码
+        返回:
+            list: 触发的价格阈值警报列表
+        """
+        triggered_alerts = []
+
+        # 获取最新价格
+        candles = self.data_storage[stock]["base"]["candles"]
+        if not candles:
+            return triggered_alerts
+
+        current_price = candles[-1]['close']
+
+        # 获取价格阈值配置
+        price_thresholds = self.config["MONITOR_STOCKS"][stock].get("price_thresholds", [])
+
+        for threshold_config in price_thresholds:
+            threshold_price = threshold_config["price"]
+            direction = threshold_config["direction"]
+            description = threshold_config.get("description", f"{direction} {threshold_price}")
+
+            # 创建唯一的警报标识符
+            alert_id = f"price_{direction}_{threshold_price}"
+
+            # 检查是否满足条件
+            condition_met = False
+            if direction == "above" and current_price >= threshold_price:
+                condition_met = True
+            elif direction == "below" and current_price <= threshold_price:
+                condition_met = True
+
+            if condition_met:
+                # 检查是否已经触发过此警报
+                if not self.price_threshold_alerted[stock].get(alert_id, False):
+                    triggered_alerts.append(f"price_threshold_{alert_id}")
+                    self.price_threshold_alerted[stock][alert_id] = True
+            else:
+                # 重置警报状态
+                self.price_threshold_alerted[stock][alert_id] = False
+
+        return triggered_alerts
+
+    def _check_change_thresholds(self, stock):
+        """
+        检查涨跌幅是否达到配置的阈值
+        参数:
+            stock: 股票代码
+        返回:
+            list: 触发的涨跌幅阈值警报列表
+        """
+        triggered_alerts = []
+
+        # 获取最新价格和昨收价格
+        candles = self.data_storage[stock]["base"]["candles"]
+        if not candles:
+            return triggered_alerts
+
+        current_price = candles[-1]['close']
+        pre_close = candles[-1]['pre_close']
+
+        # 计算涨跌幅百分比
+        if pre_close > 0:
+            change_percent = (current_price - pre_close) / pre_close * 100
+        else:
+            return triggered_alerts
+
+        # 获取涨跌幅阈值配置
+        change_thresholds = self.config["MONITOR_STOCKS"][stock].get("change_thresholds", [])
+
+        for threshold_config in change_thresholds:
+            threshold_change = threshold_config["change"]
+            direction = threshold_config["direction"]
+            description = threshold_config.get("description", f"{direction} {threshold_change}%")
+
+            # 创建唯一的警报标识符
+            alert_id = f"change_{direction}_{threshold_change}"
+
+            # 检查是否满足条件
+            condition_met = False
+            if direction == "above" and change_percent >= threshold_change:
+                condition_met = True
+            elif direction == "below" and change_percent <= threshold_change:
+                condition_met = True
+
+            if condition_met:
+                # 检查是否已经触发过此警报
+                if not self.change_threshold_alerted[stock].get(alert_id, False):
+                    triggered_alerts.append(f"change_threshold_{alert_id}")
+                    self.change_threshold_alerted[stock][alert_id] = True
+            else:
+                # 重置警报状态
+                self.change_threshold_alerted[stock][alert_id] = False
 
         return triggered_alerts
 
@@ -379,8 +498,18 @@ class StockMonitor:
                 if len(data_list) != 0:
                     self.update_data_storage(data_list)
                     for stock in self.config["MONITOR_STOCKS"].keys():
+                        # 检查价格阈值条件
+                        price_threshold_alerts = self._check_price_thresholds(stock)
+                        if price_threshold_alerts:
+                            self.send_alert(stock, 0, price_threshold_alerts)
+
+                        # 检查涨跌幅阈值条件
+                        change_threshold_alerts = self._check_change_thresholds(stock)
+                        if change_threshold_alerts:
+                            self.send_alert(stock, 0, change_threshold_alerts)
+
+                        # 检查时间窗口条件
                         for window_sec in self.config["MONITOR_STOCKS"][stock]["windows_sec"]:
-                            # 使用重构后的检测方法
                             conditions = self.check_alert_conditions(stock, window_sec)
                             if conditions:
                                 self.send_alert(stock, window_sec, conditions)
@@ -414,6 +543,7 @@ class StockMonitor:
                     'low': float(data['low']),
                     'close': float(data['close']),
                     'vol': int(data['vol']),
+                    'pre_close': float(data.get('pre_close', data['close'])),  # 添加昨收价格，如果没有则使用当前价格
                     'time': timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                 })
                 data_list[i] = StockDataDay.from_json(data_point)
@@ -439,8 +569,17 @@ class StockMonitor:
         CONFIG["DEBUG_MODE"] = True  # 强制开启调试模式
         # 执行检测
         for stock in self.config["MONITOR_STOCKS"].keys():
+            # 检查价格阈值条件
+            price_threshold_alerts = self._check_price_thresholds(stock)
+            if price_threshold_alerts:
+                self.send_alert(stock, 0, price_threshold_alerts)
+
+            # 检查涨跌幅阈值条件
+            change_threshold_alerts = self._check_change_thresholds(stock)
+            if change_threshold_alerts:
+                self.send_alert(stock, 0, change_threshold_alerts)
+
             for window_sec in self.config["MONITOR_STOCKS"][stock]["windows_sec"]:
-                # 使用重构后的检测方法
                 conditions = self.check_alert_conditions(stock, window_sec)
                 if conditions:
                     self.send_alert(stock, window_sec, conditions)
@@ -451,9 +590,12 @@ class StockMonitor:
         for stock in self.config["MONITOR_STOCKS"].keys():
             if self.data_storage[stock]["base"]["candles"]:
                 last_candle = self.data_storage[stock]["base"]["candles"][-1]
+                pre_close = last_candle.get('pre_close', 0)
+                change_percent = ((last_candle['close'] - pre_close) / pre_close * 100) if pre_close > 0 else 0
+
                 print(
                     f"{stock} 最新数据: 时间={last_candle['timestamp'].strftime('%H:%M:%S')}, "
-                    f"收盘价={last_candle['close']:.2f}, 成交量={last_candle['vol']}")
+                    f"收盘价={last_candle['close']:.2f}, 涨跌幅={change_percent:.2f}%, 成交量={last_candle['vol']}")
 
         print("=" * 30)
 
@@ -476,6 +618,14 @@ class StockMonitor:
                     if "windows_sec" not in stock_config:
                         stock_config["windows_sec"] = [int(sec) for sec in stock_config["thresholds"].keys()]
 
+                # 确保price_thresholds存在，如果没有则初始化为空列表
+                if "price_thresholds" not in stock_config:
+                    stock_config["price_thresholds"] = []
+
+                # 确保change_thresholds存在，如果没有则初始化为空列表
+                if "change_thresholds" not in stock_config:
+                    stock_config["change_thresholds"] = []
+
             self.config["MONITOR_STOCKS"] = new_config
             self.initialize_data_storage()  # 重新初始化数据存储
             print(f"成功重新加载 {len(new_config)} 只股票的配置")
@@ -491,6 +641,9 @@ class StockMonitor:
                 count = len(data["candles"])
                 if count > 0:
                     last_candle = data["candles"][-1]
+                    pre_close = last_candle.get('pre_close', 0)
+                    change_percent = ((last_candle['close'] - pre_close) / pre_close * 100) if pre_close > 0 else 0
+
                     # 将秒转换为更易读的时间单位
                     if window_sec == "base":
                         window_str = f"基础({data['interval']}秒)"
@@ -502,7 +655,7 @@ class StockMonitor:
                         window_str = f"{window_sec // 3600}小时"
 
                     print(f"  {window_str}: {count}条数据, 最新: {last_candle['timestamp'].strftime('%H:%M:%S')} "
-                          f"收盘价={last_candle['close']:.2f} 成交量={last_candle['vol']}")
+                          f"收盘价={last_candle['close']:.2f}, 涨跌幅={change_percent:.2f}%, 成交量={last_candle['vol']}")
                 else:
                     if window_sec == "base":
                         window_str = f"基础({data['interval']}秒)"

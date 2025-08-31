@@ -17,7 +17,15 @@
         "price_drop": [-1.4],
         "price_rise": [1.4]
       }
-    }
+    },
+    "price_thresholds": [
+      {"price": 2000, "direction": "above", "description": "突破2000点"},
+      {"price": 1800, "direction": "below", "description": "跌破1800点"}
+    ],
+    "change_thresholds": [
+      {"change": 2.5, "direction": "above", "description": "涨幅超过2.5%"},
+      {"change": -2.0, "direction": "below", "description": "跌幅超过2%"}
+    ]
   },
   "601933.SH": {
     "thresholds": {
@@ -33,7 +41,15 @@
         "price_drop": [-1.4],
         "price_rise": [1.4]
       }
-    }
+    },
+    "price_thresholds": [
+      {"price": 5.5, "direction": "above", "description": "突破5.5元"},
+      {"price": 4.8, "direction": "below", "description": "跌破4.8元"}
+    ],
+    "change_thresholds": [
+      {"change": 3.0, "direction": "above", "description": "涨幅超过3%"},
+      {"change": -2.5, "direction": "below", "description": "跌幅超过2.5%"}
+    ]
   },
   "513000.SH": {
     "thresholds": {
@@ -49,7 +65,15 @@
         "price_drop": [-1.4],
         "price_rise": [1.4]
       }
-    }
+    },
+    "price_thresholds": [
+      {"price": 1.05, "direction": "above", "description": "突破1.05元"},
+      {"price": 0.95, "direction": "below", "description": "跌破0.95元"}
+    ],
+    "change_thresholds": [
+      {"change": 1.5, "direction": "above", "description": "涨幅超过1.5%"},
+      {"change": -1.5, "direction": "below", "description": "跌幅超过1.5%"}
+    ]
   },
   "002594.SZ": {
     "thresholds": {
@@ -65,6 +89,14 @@
         "price_drop": [-1.4],
         "price_rise": [1.4]
       }
-    }
+    },
+    "price_thresholds": [
+      {"price": 250, "direction": "above", "description": "突破250元"},
+      {"price": 220, "direction": "below", "description": "跌破220元"}
+    ],
+    "change_thresholds": [
+      {"change": 4.0, "direction": "above", "description": "涨幅超过4%"},
+      {"change": -3.5, "direction": "below", "description": "跌幅超过3.5%"}
+    ]
   }
 }
