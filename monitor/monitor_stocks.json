@@ -51,30 +51,6 @@
       {"change": -2.5, "direction": "below", "description": "跌幅超过2.5%"}
     ]
   },
-  "513000.SH": {
-    "thresholds": {
-      "60": {
-        "price_drop": [-0.3],
-        "price_rise": [0.3]
-      },
-      "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
-      },
-      "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
-      }
-    },
-    "price_thresholds": [
-      {"price": 1.05, "direction": "above", "description": "突破1.05元"},
-      {"price": 0.95, "direction": "below", "description": "跌破0.95元"}
-    ],
-    "change_thresholds": [
-      {"change": 1.5, "direction": "above", "description": "涨幅超过1.5%"},
-      {"change": -1.5, "direction": "below", "description": "跌幅超过1.5%"}
-    ]
-  },
   "002594.SZ": {
     "thresholds": {
       "60": {
