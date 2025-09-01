@@ -115,8 +115,7 @@ class IndexAnalysis:
             lambda x: '%s-%s-%s %s:%s' % (x[0:4], x[4:6], x[6:8], x[8:10], x[10:12]))
         df['candle_end_time'] = pd.to_datetime(df['candle_end_time'])
         df = df[['candle_end_time', 'open', 'high', 'low', 'close', 'amount']]
-        print(df)
-        return df
+         return df
 
         # ===考察其他周期、指数、ETF
 

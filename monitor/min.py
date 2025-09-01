@@ -166,75 +166,6 @@ class StockMonitor:
                 # 更新最后更新时间
                 self.last_update_time[stock] = current_time
 
-    def get_kline_data_by_window(self, stock, window_sec):
-        """
-        获取指定时间窗口的全量K线数据
-
-        参数:
-            stock: 股票代码
-            window_sec: 时间窗口长度(秒)
-
-        返回:
-            list: K线数据列表，每个元素是一个字典，包含:
-                - open: 开盘价
-                - high: 最高价
-                - low: 最低价
-                - close: 收盘价
-                - volume: 该时间窗口内的成交量
-                - start_time: 窗口开始时间
-                - end_time: 窗口结束时间
-        """
-        if stock not in self.data_storage:
-            return []
-
-        base_data = self.data_storage[stock]["base"]["candles"]
-        if not base_data:
-            return []
-
-        # 计算每个K线需要的数据点数量
-        points_per_bar = window_sec // self.config["BASE_INTERVAL"]
-        if points_per_bar < 1:
-            points_per_bar = 1  # 确保至少有一个数据点
-
-        klines = []
-
-        # 只处理完整窗口的数据
-        num_complete_bars = len(base_data) // points_per_bar
-
-        for i in range(num_complete_bars):
-            start_idx = i * points_per_bar
-            end_idx = start_idx + points_per_bar
-            bar_data = base_data[start_idx:end_idx]
-
-            # 计算K线元素
-            open_price = bar_data[0]['close']  # 使用第一个数据点的收盘价作为开盘价
-            close_price = bar_data[-1]['close']  # 使用最后一个数据点的收盘价作为收盘价
-
-            # 找出最高价和最低价
-            high_price = max(item['close'] for item in bar_data)
-            low_price = min(item['close'] for item in bar_data)
-
-            # 计算成交量 (最后一个数据点的成交量减去第一个数据点的成交量)
-            volume = bar_data[-1]['vol'] - bar_data[0]['vol']
-            if volume < 0:
-                # 如果出现负值，可能是跨天了，使用最后一个数据点的成交量
-                volume = bar_data[-1]['vol']
-
-            # 记录时间窗口
-            start_time = bar_data[0]['timestamp']
-            end_time = bar_data[-1]['timestamp']
-
-            klines.append({
-                'open': open_price,
-                'high': high_price,
-                'low': low_price,
-                'close': close_price,
-                'volume': volume,
-                'start_time': start_time,
-                'end_time': end_time
-            })
-
-        return klines
 
     def check_alert_conditions(self, stock, window_sec):
         """
@@ -249,7 +180,7 @@ class StockMonitor:
         thresholds = self.config["MONITOR_STOCKS"][stock]["thresholds"].get(window_str, {})
 
         # 检查各个警报条件
-        if self._check_volume_spike(candles, thresholds, stock):
+        if self._check_volume_spike( thresholds, stock):
             triggered_conditions.append("volume_spike")
 
         price_alerts = self._check_price_movement(candles, window_sec, self.config["MONITOR_STOCKS"][stock])
@@ -265,8 +196,8 @@ class StockMonitor:
 
         return triggered_conditions
 
-    def _check_volume_spike(self, candles, thresholds, stock):
-        five_min_klines = self.get_kline_data_by_window(stock, 3)  # 5分钟窗口
+    def _check_volume_spike(self, thresholds, stock):
+        five_min_klines = IndexAnalysis.rt_min(stock, 3)  # 5分钟窗口
         return False
 
     def _check_price_movement(self, price_array, window_sec, thresholds_config):
