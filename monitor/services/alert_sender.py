@@ -27,24 +27,7 @@ class AlertSender:
         if not valid_conditions:
             return
 
-        price_alerts = []
-        for condition in valid_conditions:
-            if condition.startswith("price_drop_"):
-                parts = condition.split("_")
-                if len(parts) >= 3:
-                    threshold = parts[2]
-                    window_str = "_".join(parts[3:]) if len(parts) > 3 else f"{window_sec}秒"
-                    price_alerts.append(f"下跌{threshold}%({window_str})")
-            elif condition.startswith("price_rise_"):
-                parts = condition.split("_")
-                if len(parts) >= 3:
-                    threshold = parts[2]
-                    window_str = "_".join(parts[3:]) if len(parts) > 3 else f"{window_sec}秒"
-                    price_alerts.append(f"上涨{threshold}%({window_str})")
-            else:
-                price_alerts.append(condition)
-
-        conditions_str = "、".join(price_alerts)
+        conditions_str = "、".join(valid_conditions)
         alert_info = f"{self.get_stock_name(stock)} {conditions_str}警报 {current_time.strftime('%H:%M:%S')}"
         self.alerts_history.append(alert_info)
 

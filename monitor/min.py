@@ -280,8 +280,6 @@ class StockMonitor:
         for threshold_config in price_thresholds:
             threshold_price = threshold_config["price"]
             direction = threshold_config["direction"]
-            description = threshold_config.get("description", f"{direction} {threshold_price}")
-
             # 创建唯一的警报标识符
             alert_id = f"price_{direction}_{threshold_price}"
 
@@ -333,7 +331,6 @@ class StockMonitor:
         for threshold_config in change_thresholds:
             threshold_change = threshold_config["change"]
             direction = threshold_config["direction"]
-            description = threshold_config.get("description", f"{direction} {threshold_change}%")
 
             # 创建唯一的警报标识符
             alert_id = f"change_{direction}_{threshold_change}"

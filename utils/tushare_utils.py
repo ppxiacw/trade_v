@@ -115,7 +115,10 @@ class IndexAnalysis:
             lambda x: '%s-%s-%s %s:%s' % (x[0:4], x[4:6], x[6:8], x[8:10], x[10:12]))
         df['candle_end_time'] = pd.to_datetime(df['candle_end_time'])
         df = df[['candle_end_time', 'open', 'high', 'low', 'close', 'amount']]
-         return df
+        cols_to_convert = df.columns.drop('candle_end_time')
+        df[cols_to_convert] = df[cols_to_convert].apply(pd.to_numeric, errors='coerce')
+
+        return df
 
         # ===考察其他周期、指数、ETF
 
@@ -128,15 +131,10 @@ class IndexAnalysis:
 if __name__ == "__main__":
     # df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='20250509', end_date='20250410')
     # 获取浦发银行60000.SH的历史分钟数据
-    df = pro.stk_mins(ts_code='000001.SH', freq='1min', start_date='2025-06-27 09:30:00',
-                      end_date='2025-07-27 09:40:00')
-    print(str(df))
-
-    print(ts.realtime_quote(ts_code='399006.SZ', src='sina'))
-    # 软件上显示的9.35带上了集合竞价 也就是9.30那一个值
-    # df = pro.stk_auction(ts_code='600919.SH',trade_date='20250627',
-    #                      fields='ts_code, trade_date,vol,price,amount,turnover_rate,volume_ratio')
+    df =IndexAnalysis.rt_min('600000.SH',k_type=1,num=320)
     print(df)
+
+
 
 
 

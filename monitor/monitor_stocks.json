@@ -1,5 +1,6 @@
 {
   "399006.SZ": {
+    "name": "创业板指",
     "thresholds": {
       "5": {
         "price_drop": [-0.1],
@@ -19,15 +20,16 @@
       }
     },
     "price_thresholds": [
-      {"price": 2000, "direction": "above", "description": "突破2000点"},
-      {"price": 1800, "direction": "below", "description": "跌破1800点"}
+      {"price": 2000, "direction": "above"},
+      {"price": 1800, "direction": "below"}
     ],
     "change_thresholds": [
-      {"change": 2.5, "direction": "above", "description": "涨幅超过2.5%"},
-      {"change": -2.0, "direction": "below", "description": "跌幅超过2%"}
+      {"change": 2.5, "direction": "above"},
+      {"change": -2.0, "direction": "below"}
     ]
   },
   "601933.SH": {
+    "name": "永辉超市",
     "thresholds": {
       "60": {
         "price_drop": [-0.3],
@@ -43,15 +45,16 @@
       }
     },
     "price_thresholds": [
-      {"price": 5.5, "direction": "above", "description": "突破5.5元"},
-      {"price": 4.8, "direction": "below", "description": "跌破4.8元"}
+      {"price": 5.5, "direction": "above"},
+      {"price": 4.8, "direction": "below"}
     ],
     "change_thresholds": [
-      {"change": 3.0, "direction": "above", "description": "涨幅超过3%"},
-      {"change": -2.5, "direction": "below", "description": "跌幅超过2.5%"}
+      {"change": 3.0, "direction": "above"},
+      {"change": -2.5, "direction": "below"}
     ]
   },
   "002594.SZ": {
+    "name": "比亚迪",
     "thresholds": {
       "60": {
         "price_drop": [-0.3],
@@ -67,12 +70,12 @@
       }
     },
     "price_thresholds": [
-      {"price": 250, "direction": "above", "description": "突破250元"},
-      {"price": 220, "direction": "below", "description": "跌破220元"}
+      {"price": 250, "direction": "above"},
+      {"price": 220, "direction": "below"}
     ],
     "change_thresholds": [
-      {"change": 4.0, "direction": "above", "description": "涨幅超过4%"},
-      {"change": -3.5, "direction": "below", "description": "跌幅超过3.5%"}
+      {"change": 4.0, "direction": "above"},
+      {"change": -3.5, "direction": "below"}
     ]
   }
 }
