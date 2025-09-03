@@ -46,13 +46,14 @@ def manual_input():
 @app.route('/api/reload_config')
 def reload_config():
     # 这里需要实现重新加载配置的逻辑
+    config.reload_config()
+    stock_data.initialize_data_storage()
     return "配置重载功能"
 
     # 启动监控线程
 
-
-if not config.DEBUG_MODE:
+if __name__ == "__main__":
     monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
     monitor_thread.start()
 
-app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000)

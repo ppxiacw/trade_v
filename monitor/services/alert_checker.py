@@ -29,6 +29,12 @@ class AlertChecker:
             alerts.extend(conditions)
 
         common_alerts =  self.check_common(stock)
+        # 将 common_alerts 中值为 True 的键添加到警报列表
+        for alert_type, is_triggered in common_alerts.items():
+            if is_triggered:
+                # 可以根据需要格式化警报消息
+                alert_message = f"{stock}: {alert_type} alert triggered"
+                alerts.append(alert_message)
 
         return alerts
 
@@ -165,8 +171,8 @@ class AlertChecker:
         # 1. 检查是否突然放巨量（当前量能是过去平均的3倍）
         avg_volume = results_1_min['amount'].mean()
 
-        # 当前成交量超过平均成交量的3倍
-        results["sudden_volume"] = last_k['amount'] > 3 * avg_volume
+        # 当前成交量超过平均成交量的3倍 todo 感觉这里还要加一个or 跟前几个相比，然后开盘前几分钟屏蔽
+        results["sudden_volume"] = last_k['amount'] > 2 * avg_volume
 
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线

@@ -18,15 +18,28 @@
         "price_drop": [-1.4],
         "price_rise": [1.4]
       }
-    },
-    "price_thresholds": [
-      {"price": 2000, "direction": "above"},
-      {"price": 1800, "direction": "below"}
-    ],
-    "change_thresholds": [
-      {"change": 2.5, "direction": "above"},
-      {"change": -2.0, "direction": "below"}
-    ]
+    }
+  },
+    "000001.SH": {
+    "name": "上证指数",
+    "thresholds": {
+      "5": {
+        "price_drop": [-0.1],
+        "price_rise": [0.1]
+      },
+      "60": {
+        "price_drop": [-0.3],
+        "price_rise": [0.3]
+      },
+      "100": {
+        "price_drop": [-0.5],
+        "price_rise": [0.5]
+      },
+      "120": {
+        "price_drop": [-1.4],
+        "price_rise": [1.4]
+      }
+    }
   },
   "601933.SH": {
     "name": "永辉超市",
@@ -68,14 +81,6 @@
         "price_drop": [-1.4],
         "price_rise": [1.4]
       }
-    },
-    "price_thresholds": [
-      {"price": 250, "direction": "above"},
-      {"price": 220, "direction": "below"}
-    ],
-    "change_thresholds": [
-      {"change": 4.0, "direction": "above"},
-      {"change": -3.5, "direction": "below"}
-    ]
+    }
   }
 }

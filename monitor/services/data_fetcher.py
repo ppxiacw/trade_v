@@ -1,3 +1,5 @@
+import os
+
 import tushare as ts
 import pandas as pd
 from datetime import datetime
@@ -23,7 +25,9 @@ class DataFetcher:
 
     def get_manual_data(self, json_file="manual.json"):
         try:
-            with open(json_file, 'r', encoding='utf-8') as f:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            config_path = os.path.join(current_dir, 'manual.json')
+            with open(config_path, 'r', encoding='utf-8') as f:
                 data_list = json.load(f)
 
             result = []
@@ -34,7 +38,7 @@ class DataFetcher:
                     timestamp = datetime.now()
 
                 data_point = pd.Series({
-                    'ts_code': data['ts_code'],
+                    'stock_code': data['ts_code'],
                     'open': float(data['open']),
                     'high': float(data['high']),
                     'low': float(data['low']),

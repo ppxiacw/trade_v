@@ -40,7 +40,6 @@ class AlertSender:
         try:
             return result_dict[stock_code]['name']
         except Exception as e:
-            print(f"获取股票名称失败: {e}")
             return stock_code
 
     def get_alert_history(self):
