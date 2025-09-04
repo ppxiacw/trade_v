@@ -11,8 +11,8 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
     data = {
         "msgtype": "actionCard",
         "actionCard": {
-            "title": title,
-            "text": f"**股票代码**: {tsCode} \n\n ![走势缩略图]({image_url})",
+            "title": f"{ title}\n\n !",
+            "text":f"{ title}\n\n ![走势缩略图]({image_url})",
             "btns": [
                 {
                     "title": "查看高清大图",
