@@ -200,17 +200,13 @@ class AlertChecker:
 
         # 4. 检查吞没形态（阳包阴或阴包阳）
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
-        if (prev_k['close'] < prev_k['open'] and  # 前一根是阴线
-                last_k['close'] > last_k['open'] and  # 当前是阳线
-                last_k['open'] <= prev_k['close'] and
-                last_k['close'] >= prev_k['open']):
+        if (last_k['open'] <= prev_k['close'] < prev_k['open'] <= last_k['close'] and  # 前一根是阴线
+                last_k['close'] > last_k['open']):
             results["engulfing"] = True
 
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
-        elif (prev_k['close'] > prev_k['open'] and  # 前一根是阳线
-              last_k['close'] < last_k['open'] and  # 当前是阴线
-              last_k['open'] >= prev_k['close'] and
-              last_k['close'] <= prev_k['open']):
+        elif (last_k['open'] >= prev_k['close'] > prev_k['open'] >= last_k['close'] and  # 前一根是阳线
+              last_k['close'] < last_k['open']):
             results["engulfing"] = True
 
         return results
