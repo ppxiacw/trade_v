@@ -29,14 +29,12 @@ class AlertChecker:
             conditions = self._check_time_window_conditions(stock, window_sec)
             alerts.extend(conditions)
 
-        common_alerts = self.check_common(stock)
+        common_alerts,minutes = self.check_common(stock)
         # 将 common_alerts 中值为 True 的键添加到警报列表
         for alert_type, is_triggered in common_alerts.items():
             if is_triggered:
                 # 可以根据需要格式化警报消息
-                #加入uuid,common预警不设置时间冷却
-                uuid = get_uuid()
-                alert_message = f"{stock}: {alert_type} {uuid}"
+                alert_message = f"{stock}: {alert_type} {minutes}"
                 alerts.append(alert_message)
 
         return alerts
@@ -211,4 +209,4 @@ class AlertChecker:
               last_k['close'] < last_k['open']):
             results["engulfing"] = True
 
-        return results
+        return results,'1min'+str(last_k['candle_end_time'].minute)
