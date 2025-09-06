@@ -1,25 +1,36 @@
 import requests
 import json
 import random
+import re
+
+
+
+
 ma_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
 bottom_line_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=bce85be747a6d8d29caa7b910b54bb442fb86fe77b7839375c4e41e71fe6fdae'
 shrink_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
 def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'):
     headers = {'Content-Type': 'application/json'}
-    image_url = generate_stock_image_url(tsCode)
+    image_url1 = generate_stock_image_url(tsCode)
+    image_url2 = generate_stock_image_url(tsCode,'mink5')
+
 
     data = {
         "msgtype": "actionCard",
         "actionCard": {
             "title": f"{ title}\n\n !",
-            "text":f"{ title}\n\n ![走势缩略图]({image_url})",
+            "text": f"{ title}\n\n ![走势缩略图1]({image_url1}) \n\n ![走势缩略图2]({image_url2})",
             "btns": [
                 {
-                    "title": "查看高清大图",
-                    "actionURL": image_url  # 点击按钮跳转浏览器打开
+                    "title": "分时图",
+                    "actionURL": image_url1
+                },
+                {
+                    "title": "五分图",
+                    "actionURL": image_url2
                 }
             ],
-            "btnOrientation": "0"
+            "btnOrientation": "1"  # 设置按钮垂直排列，如果按钮多的话
         }
     }
     print(str(data))
@@ -30,10 +41,9 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
     else:
         print(f"失败状态码：{response.status_code}")
 
-import re
 
 
-def generate_stock_image_url(stock_code: str) -> str:
+def generate_stock_image_url(stock_code: str,k_type='min') -> str:
     """
     生成新浪股票日线图 URL（支持 000001.SH 格式）
 
@@ -52,7 +62,7 @@ def generate_stock_image_url(stock_code: str) -> str:
     sina_code = f"{exchange_part.lower()}{code_part}"
 
     # 生成 URL
-    return f"http://image.sinajs.cn/newchart/mink5/n/{sina_code}.gif?t={random.randint(0, 99999)}"
+    return f"http://image.sinajs.cn/newchart/{k_type}/n/{sina_code}.gif?t={random.randint(0, 99999)}"
 
 
 

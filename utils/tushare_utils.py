@@ -11,6 +11,7 @@ from urllib.request import urlopen  # python自带爬虫库
 import json  # python自带的json数据库
 from random import randint  # python自带的随机数库
 import pandas as pd
+from utils.date_utils import Date_utils
 pd.set_option('expand_frame_repr', False)  # 当列太多时不换行
 
 # 获取当前脚本的完整路径
@@ -32,6 +33,9 @@ ts.set_token(token)
 pro = ts.pro_api(token)
 
 stock_list  = result
+ma_cache = {}
+
+
 class IndexAnalysis:
     def __init__(self):
         pass
@@ -125,8 +129,24 @@ class IndexAnalysis:
         # ===考察特殊情况
         # 正常股票：sz000001 sz000002，退市股票：sh600002 sz000003、停牌股票：sz300124，上市新股：sz002952，除权股票：sh600276，
 
+    @staticmethod
+    def get_ma(stock_code):
+        ma_cache = {}
+        # 检查缓存中是否存在且未过期（假设缓存1小时）
+        cache_key = f"ma_{stock_code}"
+        if cache_key in ma_cache:
+            return ma_cache[cache_key]
 
+        # 缓存中没有或已过期，重新获取数据
+        data = ts.pro_bar(
+            ts_code=stock_code,
+            start_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=False),-130,True),
+            end_date=Date_utils.get_today(replace=True),
+            ma=[5,10, 20, 30,60,120])
 
+        # 存入缓存
+        ma_cache[cache_key] = data
+        return data
 # 使用类进行分析
 if __name__ == "__main__":
     # df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='20250509', end_date='20250410')

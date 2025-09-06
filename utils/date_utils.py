@@ -18,7 +18,7 @@ class Date_utils:
         return Date_utils.calendar_cache[year_str]
 
     @staticmethod
-    def get_date_by_step(date_str, n):
+    def get_date_by_step(date_str, n, replace=False):
         calendar = Date_utils.get_trade_calendar(date_str[:4])
         start_index = calendar[calendar['trade_date'] == date_str].index[0] if not calendar[
             calendar['trade_date'] == date_str].empty else None
@@ -34,7 +34,11 @@ class Date_utils:
                         if len(selected_rows) >= n + 1:
                             break
                 result_df = pd.DataFrame(selected_rows)['trade_date']
-                return result_df.iloc[-1]
+                result = result_df.iloc[-1]
+                if replace:
+                    return result.replace('-', '')
+                else:
+                    return result
             elif n < 0:
                 for i in range(start_index, -1, -1):
                     row = calendar.iloc[i]
@@ -43,7 +47,11 @@ class Date_utils:
                         if len(selected_rows) >= abs(n - 1):
                             break
                 result_df = pd.DataFrame(selected_rows)['trade_date']
-                return result_df.iloc[-1]
+                result = result_df.iloc[-1]
+                if replace:
+                    return result.replace('-', '')
+                else:
+                    return result
             else:
                 return pd.DataFrame()  # 如果 n 是 0，则返回空 DataFrame
         else:

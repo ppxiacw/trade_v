@@ -9,7 +9,7 @@ pro = ts.pro_api(TOKEN)
 
 try:
     # 获取最近交易日
-    last_trade_date = pro.trade_cal(exchange='SSE', end_date='20250730', is_open=1)['cal_date'].iloc[-1]
+    last_trade_date = pro.trade_cal(exchange='SSE', end_date='20250903', is_open=1)['cal_date'].iloc[-1]
 
     # 获取基础信息
     df_basic = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name')

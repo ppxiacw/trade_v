@@ -2,6 +2,7 @@ from datetime import datetime
 from utils.tushare_utils import IndexAnalysis
 from utils.comminUtils import get_uuid
 
+
 class AlertChecker:
     def __init__(self, config, stock_data):
         self.config = config
@@ -24,12 +25,15 @@ class AlertChecker:
         change_threshold_alerts = self._check_change_thresholds(stock)
         alerts.extend(change_threshold_alerts)
 
+        ma_alerts = self._check_ma_breakdown(stock)
+        alerts.extend(ma_alerts)
+
         # 检查时间窗口内涨跌条件
         for window_sec in self.config.MONITOR_STOCKS[stock]["windows_sec"]:
             conditions = self._check_time_window_conditions(stock, window_sec)
             alerts.extend(conditions)
 
-        common_alerts,minutes = self.check_common(stock)
+        common_alerts, minutes = self.check_common(stock)
         # 将 common_alerts 中值为 True 的键添加到警报列表
         for alert_type, is_triggered in common_alerts.items():
             if is_triggered:
@@ -110,6 +114,39 @@ class AlertChecker:
                     self.price_threshold_alerted[stock][alert_id] = True
             else:
                 self.price_threshold_alerted[stock][alert_id] = False
+
+        return triggered_alerts
+
+    def _check_ma_breakdown(self, stock):
+        """监控股票是否跌破均线"""
+        triggered_alerts = []
+        candles = self.stock_data.get_stock_data(stock)
+        ma = IndexAnalysis.get_ma(stock)[:1]
+        if not candles:
+            return triggered_alerts
+
+        # 获取当前价格
+        current_price = candles[-1]['close']
+
+        # 获取所有均线配置
+        ma_types = self.config.MONITOR_STOCKS[stock].get("ma_types", [5, 10, 20, 30, 60, 120])
+
+        for ma_type in ma_types:
+            ma_key = f"ma{ma_type}"
+
+            # 检查是否存在该均线数据
+            if ma_key not in ma:
+                continue
+
+            ma_value = ma[ma_key]
+            if len(ma_value) == 0:
+                return []
+            # 如果当前价格小于等于均线值
+            if current_price <= ma_value[0] < candles[-1]['pre_close']:
+                # 生成告警消息
+                message = f"{stock} 跌破{ma_type}日均线，当前价: {current_price:.2f}，均线: {ma_value[0]:.2f}"
+
+                triggered_alerts.append(message)
 
         return triggered_alerts
 
@@ -209,4 +246,4 @@ class AlertChecker:
               last_k['close'] < last_k['open']):
             results["engulfing"] = True
 
-        return results,'1min'+str(last_k['candle_end_time'].minute)
+        return results, '1min' + str(last_k['candle_end_time'].minute)
