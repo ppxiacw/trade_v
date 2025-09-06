@@ -144,7 +144,7 @@ class AlertChecker:
             # 如果当前价格小于等于均线值
             if current_price <= ma_value[0] < candles[-1]['pre_close']:
                 # 生成告警消息
-                message = f"{stock} 跌破{ma_type}日均线，当前价: {current_price:.2f}，均线: {ma_value[0]:.2f}"
+                message = f"{stock} break{ma_type}ma"
 
                 triggered_alerts.append(message)
 
