@@ -34,13 +34,21 @@ class AlertChecker:
             alerts.extend(conditions)
 
         if self.config.MONITOR_STOCKS[stock].get("common",True):
-            common_alerts, minutes = self._check_common(stock)
+            common_alerts_1, minutes = self._check_common_by_min(stock)
             # 将 common_alerts 中值为 True 的键添加到警报列表
-            for alert_type, is_triggered in common_alerts.items():
+            for alert_type, is_triggered in common_alerts_1.items():
                 if is_triggered:
                     # 可以根据需要格式化警报消息
                     alert_message = f"{stock}: {alert_type} {minutes}"
                     alerts.append(alert_message)
+            common_alerts_5, minutes = self._check_common_by_min(stock,5)
+            # 将 common_alerts 中值为 True 的键添加到警报列表
+            for alert_type, is_triggered in common_alerts_5.items():
+                if is_triggered:
+                    # 可以根据需要格式化警报消息
+                    alert_message = f"{stock}: {alert_type} {minutes}"
+                    alerts.append(alert_message)
+
 
         return alerts
 
@@ -188,12 +196,12 @@ class AlertChecker:
 
         return triggered_alerts
 
-    def _check_common(self, stock):
+    def _check_common_by_min(self, stock, window=1):
         # 获取1分钟K线数据 todo 加入五分钟的
-        results_1_min = IndexAnalysis.rt_min(stock, 1)
+        results_min = IndexAnalysis.rt_min(stock, window)
 
         # 获取最后三根K线数据
-        last_three = results_1_min.iloc[-3:]
+        last_three = results_min.iloc[-3:]
         last_k = last_three.iloc[-1]  # 最后一根K线
         prev_k = last_three.iloc[-2]  # 倒数第二根K线
         prev_prev_k = last_three.iloc[-3]  # 倒数第三根K线
@@ -207,7 +215,7 @@ class AlertChecker:
         }
 
         # 1. 检查是否突然放巨量（当前量能是过去平均的3倍）
-        avg_volume = results_1_min['amount'].mean()
+        avg_volume = results_min['amount'].mean()
 
         # 当前成交量超过平均成交量的3倍
         results["sudden_volume"] = last_k['amount'] > 3 * avg_volume and last_k['amount'] > 3 * prev_k['amount']
@@ -247,4 +255,4 @@ class AlertChecker:
               last_k['close'] < last_k['open']):
             results["engulfing"] = True
 
-        return results, '1min' + str(last_k['candle_end_time'].minute)
+        return results, str(window) + 'min' + str(last_k['candle_end_time'].minute)
