@@ -137,12 +137,33 @@ class IndexAnalysis:
         if cache_key in ma_cache:
             return ma_cache[cache_key]
 
+        if stock_code.endswith('.SH'):
+            if stock_code[:3] in ['000', '999']:
+                asset_type = 'I'
+            elif stock_code[:2] in ['50', '51']:
+                asset_type = 'FD'
+            elif stock_code[:3] in ['110', '113']:
+                asset_type = 'CB'
+            else:
+                asset_type = 'E'
+        elif stock_code.endswith('.SZ'):
+            if stock_code[:3] == '399':
+                asset_type = 'I'
+            elif stock_code[:2] in ['15', '16', '18']:
+                asset_type = 'FD'
+            elif stock_code[:3] in ['123', '127', '128']:
+                asset_type = 'CB'
+            else:
+                asset_type = 'E'
+        else:
+            asset_type = 'E'
         # 缓存中没有或已过期，重新获取数据
         data = ts.pro_bar(
             ts_code=stock_code,
-            start_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=False),-130,True),
+            asset=asset_type,  # 使用判断出的资产类型
+            start_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=False), -130, True),
             end_date=Date_utils.get_today(replace=True),
-            ma=[5,10, 20, 30,60,120])
+            ma=[5, 10, 20, 30, 60, 120])
 
         # 存入缓存
         ma_cache[cache_key] = data

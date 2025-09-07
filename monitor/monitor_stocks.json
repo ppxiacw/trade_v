@@ -1,6 +1,7 @@
 {
   "399006.SZ": {
     "name": "创业板指",
+    "common": true,
     "thresholds": {
       "100": {
         "price_drop": [-0.5],
@@ -14,6 +15,7 @@
   },
     "000001.SH": {
     "name": "上证指数",
+    "common": true,
     "thresholds": {
       "100": {
         "price_drop": [-0.5],
@@ -27,6 +29,7 @@
   },
   "601933.SH": {
     "name": "永辉超市",
+    "common": true,
     "thresholds": {
       "60": {
         "price_drop": [-1.3],
@@ -50,13 +53,25 @@
       {"change": -2.5, "direction": "below"}
     ]
   },
-  "002594.SZ": {
-    "name": "比亚迪",
+  "600111.SH": {
+    "name": "北方稀土"
+  },
+  "513090.SH": {
+    "name": "香港证券",
+    "common": false,
+    "ma": true
+  },
+    "513780.SH": {
+    "name": "创新药",
+    "common": true,
+    "ma": true
+
+  },
+  "513000.SH": {
+    "name": "日经指数",
+    "common": false,
+    "ma": true,
     "thresholds": {
-      "60": {
-        "price_drop": [-0.3],
-        "price_rise": [0.3]
-      },
       "100": {
         "price_drop": [-0.5],
         "price_rise": [0.5]
@@ -66,5 +81,16 @@
         "price_rise": [1.4]
       }
     }
+  },
+  "513730.SH": {
+    "name": "东南亚",
+    "common": false,
+    "ma": true
+
+  },
+    "159742.SZ": {
+    "name": "恒生科技",
+    "common": false,
+    "ma": true
   }
 }

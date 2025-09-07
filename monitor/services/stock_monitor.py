@@ -14,7 +14,6 @@ class StockMonitor:
 
     def start_monitoring(self):
         print(f"开始监控 {len(self.config.MONITOR_STOCKS)} 只股票...")
-        print("按 Ctrl+C 停止监控")
 
         while True:
             try:

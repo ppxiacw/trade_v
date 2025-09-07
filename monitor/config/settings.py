@@ -33,7 +33,6 @@ class Config:
 
                     if "change_thresholds" not in stock_config:
                         stock_config["change_thresholds"] = []
-
                 return config
         except FileNotFoundError:
             print("警告: monitor_stocks.json 文件未找到")

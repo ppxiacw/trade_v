@@ -29,17 +29,18 @@ class AlertChecker:
         alerts.extend(ma_alerts)
 
         # 检查时间窗口内涨跌条件
-        for window_sec in self.config.MONITOR_STOCKS[stock]["windows_sec"]:
+        for window_sec in self.config.MONITOR_STOCKS.get(stock, {}).get("windows_sec", []):
             conditions = self._check_time_window_conditions(stock, window_sec)
             alerts.extend(conditions)
 
-        common_alerts, minutes = self.check_common(stock)
-        # 将 common_alerts 中值为 True 的键添加到警报列表
-        for alert_type, is_triggered in common_alerts.items():
-            if is_triggered:
-                # 可以根据需要格式化警报消息
-                alert_message = f"{stock}: {alert_type} {minutes}"
-                alerts.append(alert_message)
+        if self.config.MONITOR_STOCKS[stock].get("common",True):
+            common_alerts, minutes = self._check_common(stock)
+            # 将 common_alerts 中值为 True 的键添加到警报列表
+            for alert_type, is_triggered in common_alerts.items():
+                if is_triggered:
+                    # 可以根据需要格式化警报消息
+                    alert_message = f"{stock}: {alert_type} {minutes}"
+                    alerts.append(alert_message)
 
         return alerts
 
@@ -118,8 +119,11 @@ class AlertChecker:
         return triggered_alerts
 
     def _check_ma_breakdown(self, stock):
-        """监控股票是否跌破均线"""
         triggered_alerts = []
+
+        """监控股票是否跌破均线"""
+        if not self.config.MONITOR_STOCKS[stock].get("break_ma", True):
+            return triggered_alerts
         candles = self.stock_data.get_stock_data(stock)
         ma = IndexAnalysis.get_ma(stock)[:1]
         if not candles:
@@ -160,10 +164,7 @@ class AlertChecker:
         current_price = candles[-1]['close']
         pre_close = candles[-1]['pre_close']
 
-        if pre_close > 0:
-            change_percent = (current_price - pre_close) / pre_close * 100
-        else:
-            return triggered_alerts
+        change_percent = (current_price - pre_close) / pre_close * 100
 
         change_thresholds = self.config.MONITOR_STOCKS[stock].get("change_thresholds", [])
 
@@ -187,8 +188,8 @@ class AlertChecker:
 
         return triggered_alerts
 
-    def check_common(self, stock):
-        # 获取1分钟K线数据
+    def _check_common(self, stock):
+        # 获取1分钟K线数据 todo 加入五分钟的
         results_1_min = IndexAnalysis.rt_min(stock, 1)
 
         # 获取最后三根K线数据
