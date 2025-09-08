@@ -12,7 +12,7 @@ class AlertSender:
         for stock in self.config.MONITOR_STOCKS.keys():
             self.last_alert_time[stock] = {}
 
-    def send_alert(self, stock, window_sec, conditions):
+    def send_alert(self, stock, conditions):
         current_time = datetime.now()
         valid_conditions = []
 

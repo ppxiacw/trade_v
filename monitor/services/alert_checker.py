@@ -7,12 +7,7 @@ class AlertChecker:
     def __init__(self, config, stock_data):
         self.config = config
         self.stock_data = stock_data
-        self.price_threshold_alerted = {}
-        self.change_threshold_alerted = {}
 
-        for stock in self.config.MONITOR_STOCKS.keys():
-            self.price_threshold_alerted[stock] = {}
-            self.change_threshold_alerted[stock] = {}
 
     def check_all_conditions(self, stock):
         alerts = []
@@ -110,11 +105,7 @@ class AlertChecker:
                 condition_met = True
 
             if condition_met:
-                if not self.price_threshold_alerted[stock].get(alert_id, False):
-                    triggered_alerts.append(f"price_threshold_{alert_id}")
-                    self.price_threshold_alerted[stock][alert_id] = True
-            else:
-                self.price_threshold_alerted[stock][alert_id] = False
+                triggered_alerts.append(f"{alert_id}")
 
         return triggered_alerts
 
@@ -180,11 +171,7 @@ class AlertChecker:
                 condition_met = True
 
             if condition_met:
-                if not self.change_threshold_alerted[stock].get(alert_id, False):
-                    triggered_alerts.append(f"change_threshold_{alert_id}")
-                    self.change_threshold_alerted[stock][alert_id] = True
-            else:
-                self.change_threshold_alerted[stock][alert_id] = False
+                triggered_alerts.append(f"change_threshold_{alert_id}")
 
         return triggered_alerts
 
