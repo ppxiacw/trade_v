@@ -1,6 +1,6 @@
 from datetime import datetime
 from utils.tushare_utils import IndexAnalysis
-from utils.comminUtils import get_uuid
+from utils.IndicatorCalculation import IndicatorCalculation
 
 
 class AlertChecker:
@@ -33,22 +33,14 @@ class AlertChecker:
             conditions = self._check_time_window_conditions(stock, window_sec)
             alerts.extend(conditions)
 
-        if self.config.MONITOR_STOCKS[stock].get("common",True):
-            common_alerts_1, minutes = self._check_common_by_min(stock)
-            # 将 common_alerts 中值为 True 的键添加到警报列表
-            for alert_type, is_triggered in common_alerts_1.items():
-                if is_triggered:
-                    # 可以根据需要格式化警报消息
-                    alert_message = f"{stock}: {alert_type} {minutes}"
-                    alerts.append(alert_message)
-            common_alerts_5, minutes = self._check_common_by_min(stock,5)
+        if self.config.MONITOR_STOCKS[stock].get("common", True):
+            common_alerts_5, minutes = self._check_common_by_min(stock, 5)
             # 将 common_alerts 中值为 True 的键添加到警报列表
             for alert_type, is_triggered in common_alerts_5.items():
                 if is_triggered:
                     # 可以根据需要格式化警报消息
                     alert_message = f"{stock}: {alert_type} {minutes}"
                     alerts.append(alert_message)
-
 
         return alerts
 
@@ -211,14 +203,18 @@ class AlertChecker:
             "sudden_volume": False,  # 是否突然放巨量
             "up_down_up": False,  # 阳-阴-阳组合
             "down_up_down": False,  # 阴-阳-阴组合
-            "engulfing": False  # 吞没形态
+            "engulfing_up": False,  # 阳吞没形态
+            "engulfing_down": False,  # 阴吞没形态
+            "rsi_6_value": False
         }
-
+        rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6)
+        if not 20 <= rsi_6 <= 80:
+            results["rsi_6"] = rsi_6
         # 1. 检查是否突然放巨量（当前量能是过去平均的3倍）
         avg_volume = results_min['amount'].mean()
 
-        # 当前成交量超过平均成交量的3倍
-        results["sudden_volume"] = last_k['amount'] > 3 * avg_volume and last_k['amount'] > 3 * prev_k['amount']
+        # 当前成交量超过平均成交量的n倍
+        results["sudden_volume"] = last_k['amount'] > 2 * avg_volume and last_k['amount'] > 2 * prev_k['amount']
 
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线
@@ -248,11 +244,11 @@ class AlertChecker:
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
         if (last_k['open'] <= prev_k['close'] < prev_k['open'] <= last_k['close'] and  # 前一根是阴线
                 last_k['close'] > last_k['open']):
-            results["engulfing"] = True
+            results["engulfing_up"] = True
 
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
         elif (last_k['open'] >= prev_k['close'] > prev_k['open'] >= last_k['close'] and  # 前一根是阳线
               last_k['close'] < last_k['open']):
-            results["engulfing"] = True
+            results["engulfing_down"] = True
 
         return results, str(window) + 'min' + str(last_k['candle_end_time'].minute)

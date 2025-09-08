@@ -38,7 +38,19 @@ class AlertSender:
 
     def get_stock_name(self, stock_code):
         try:
-            return result_dict[stock_code]['name']
+            # 优先尝试从 config 中获取股票名称
+            if stock_code in self.config.MONITOR_STOCKS:
+                name = self.config.MONITOR_STOCKS[stock_code].get('name')
+                if name:  # 如果有值则返回
+                    return name
+
+            # 如果 config 中没有，尝试从 result_dict 中获取
+            if stock_code in result_dict:
+                name = result_dict[stock_code].get('name')
+                if name:  # 如果有值则返回
+                    return name
+
+            return stock_code
         except Exception as e:
             return stock_code
 

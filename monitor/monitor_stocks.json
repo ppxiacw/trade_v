@@ -92,5 +92,10 @@
     "name": "恒生科技",
     "common": false,
     "ma": true
+  },
+  "002966.SZ": {
+    "name": "苏州银行",
+    "common": false,
+    "ma": true
   }
 }
