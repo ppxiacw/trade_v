@@ -30,11 +30,15 @@ class AlertChecker:
 
         if self.config.MONITOR_STOCKS[stock].get("common", True):
             common_alerts_5, minutes = self._check_common_by_min(stock, 5)
-            # 将 common_alerts 中值为 True 的键添加到警报列表
+            # 处理警报条件：布尔True或非布尔类型
             for alert_type, is_triggered in common_alerts_5.items():
-                if is_triggered:
-                    # 可以根据需要格式化警报消息
+                if isinstance(is_triggered, bool) and is_triggered:
+                    # 布尔True：保持原格式
                     alert_message = f"{stock}: {alert_type} {minutes}"
+                    alerts.append(alert_message)
+                elif not isinstance(is_triggered, bool) and is_triggered:
+                    # 非布尔类型且为真值：拼接值
+                    alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
                     alerts.append(alert_message)
 
         return alerts
@@ -176,15 +180,6 @@ class AlertChecker:
         return triggered_alerts
 
     def _check_common_by_min(self, stock, window=1):
-        # 获取1分钟K线数据 todo 加入五分钟的
-        results_min = IndexAnalysis.rt_min(stock, window)
-
-        # 获取最后三根K线数据
-        last_three = results_min.iloc[-3:]
-        last_k = last_three.iloc[-1]  # 最后一根K线
-        prev_k = last_three.iloc[-2]  # 倒数第二根K线
-        prev_prev_k = last_three.iloc[-3]  # 倒数第三根K线
-
         # 初始化结果字典
         results = {
             "sudden_volume": False,  # 是否突然放巨量
@@ -194,6 +189,18 @@ class AlertChecker:
             "engulfing_down": False,  # 阴吞没形态
             "rsi_6_value": False
         }
+        # 获取1分钟K线数据 todo 加入五分钟的
+        results_min = IndexAnalysis.rt_min(stock, window)
+        # 如果最后一根k线图不完整，则不返回数据
+        if results_min.iloc[-1]['candle_end_time'] > datetime.now():
+            return results,None
+        # 获取最后三根K线数据
+        last_three = results_min.iloc[-3:]
+        last_k = last_three.iloc[-1]  # 最后一根K线
+        prev_k = last_three.iloc[-2]  # 倒数第二根K线
+        prev_prev_k = last_three.iloc[-3]  # 倒数第三根K线
+
+
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6)
         if not 20 <= rsi_6 <= 80:
             results["rsi_6"] = rsi_6

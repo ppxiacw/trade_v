@@ -27,7 +27,7 @@ class StockMonitor:
                     for stock in stock_codes:
                         alerts = self.alert_checker.check_all_conditions(stock)
                         if alerts:
-                            self.alert_sender.send_alert(stock, 0, alerts)
+                            self.alert_sender.send_alert(stock, alerts)
 
                 time.sleep(self.config.BASE_INTERVAL)
             except KeyboardInterrupt:
