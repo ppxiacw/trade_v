@@ -12,29 +12,41 @@ class AlertSender:
         for stock in self.config.MONITOR_STOCKS.keys():
             self.last_alert_time[stock] = {}
 
-    def send_alert(self, stock, conditions):
+    def send_alert(self, stock, alerts_with_cooldown):
         current_time = datetime.now()
-        valid_conditions = []
+        valid_alerts = []
 
-        for condition in conditions:
-            last_trigger_time = self.last_alert_time[stock].get(condition)
+        for alert_item in alerts_with_cooldown:
+            # 判断 alert_item 是否为 (message, cooldown) 元组
+            if isinstance(alert_item, tuple) and len(alert_item) >= 2:
+                alert_msg, cooldown = alert_item
+            else:
+                # 仅消息，使用默认冷却时间
+                alert_msg = alert_item
+                cooldown = self.config.ALERT_COOLDOWN
 
-            if last_trigger_time is None or \
-                    (current_time - last_trigger_time).total_seconds() > self.config.ALERT_COOLDOWN:
-                valid_conditions.append(condition)
-                self.last_alert_time[stock][condition] = current_time
+            # 如果 cooldown 无效 (为 None 或非正数)，使用默认冷却时间
+            if not isinstance(cooldown, (int, float)) or cooldown <= 0:
+                cooldown = self.config.ALERT_COOLDOWN
 
-        if not valid_conditions:
+            last_trigger = self.last_alert_time[stock].get(alert_msg)
+
+            # 判断是否已经过了冷却时间
+            if not last_trigger or (current_time - last_trigger).seconds >= cooldown:
+                valid_alerts.append(alert_msg)
+                self.last_alert_time[stock][alert_msg] = current_time
+
+        if not valid_alerts:
             return
 
-        conditions_str = "、".join(valid_conditions)
-        alert_info = f"{self.get_stock_name(stock)} {conditions_str}警报 {current_time.strftime('%H:%M:%S')}"
-        self.alerts_history.append(alert_info)
+        for alert_msg in valid_alerts:
+            alert_info = f"{self.get_stock_name(stock)} {alert_msg} 警报 {current_time.strftime('%H:%M:%S')}"
+            self.alerts_history.append(alert_info)
 
-        if self.config.DEBUG_MODE:
-            print(f"[DEBUG] 警报触发: {alert_info}")
-        else:
-            send_dingtalk_message(alert_info, stock)
+            if self.config.DEBUG_MODE:
+                print(f"[DEBUG] [发送] {alert_info}")
+            else:
+                send_dingtalk_message(alert_info, stock)
 
     def get_stock_name(self, stock_code):
         try:

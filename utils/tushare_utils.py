@@ -4,6 +4,7 @@ from dto.StockDataDay import StockDataDay
 from dto.RealTimeStockData import RealTimeStockData
 from datetime import datetime  # 正确导入 datetime 类
 import warnings
+import ssl
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
 from utils.GetStockData import result
@@ -101,7 +102,9 @@ class IndexAnalysis:
         url = url % (stock_code, k_type, num, k_type,random_num)
 
         # ===获取数据
-        content = urlopen(url=url, timeout=15).read().decode()  # 使用python自带的库，从网络上获取信息
+        import ssl
+        context = ssl._create_unverified_context()
+        content = urlopen(url=url, context=context, timeout=15).read().decode()  # 使用python自带的库，从网络上获取信息
 
         # ===将数据转换成dict格式
         content = content.split('=', maxsplit=1)[-1]

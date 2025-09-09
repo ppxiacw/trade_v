@@ -145,7 +145,7 @@ class AlertChecker:
                 # 生成告警消息
                 message = f"{stock} break{ma_type}ma"
 
-                triggered_alerts.append(message)
+                triggered_alerts.append((message,1000*100))
 
         return triggered_alerts
 
@@ -189,7 +189,7 @@ class AlertChecker:
             "engulfing_down": False,  # 阴吞没形态
             "rsi_6_value": False
         }
-        # 获取1分钟K线数据 todo 加入五分钟的
+        # 获取1分钟K线数据 todo 加入1分钟的
         results_min = IndexAnalysis.rt_min(stock, window)
         # 如果最后一根k线图不完整，则不返回数据
         if results_min.iloc[-1]['candle_end_time'] > datetime.now():
@@ -236,12 +236,12 @@ class AlertChecker:
 
         # 4. 检查吞没形态（阳包阴或阴包阳）
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
-        if (last_k['open'] <= prev_k['close'] < prev_k['open'] <= last_k['close'] and  # 前一根是阴线
+        if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
                 last_k['close'] > last_k['open']):
             results["engulfing_up"] = True
 
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
-        elif (last_k['open'] >= prev_k['close'] > prev_k['open'] >= last_k['close'] and  # 前一根是阳线
+        elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
               last_k['close'] < last_k['open']):
             results["engulfing_down"] = True
 
