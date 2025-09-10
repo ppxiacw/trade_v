@@ -37,7 +37,7 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
     response = requests.post(webhook_url, headers=headers, json=data,verify=False)
 
     if response.status_code == 200:
-        print("消息发送成功")
+        pass
     else:
         print(f"失败状态码：{response.status_code}")
 

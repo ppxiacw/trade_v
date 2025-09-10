@@ -4,26 +4,42 @@
     "common": true,
     "thresholds": {
       "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
+        "price_drop": [
+          -0.5
+        ],
+        "price_rise": [
+          0.5
+        ]
       },
       "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
+        "price_drop": [
+          -1.4
+        ],
+        "price_rise": [
+          1.4
+        ]
       }
     }
   },
-    "000001.SH": {
+  "000001.SH": {
     "name": "上证指数",
     "common": true,
     "thresholds": {
       "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
+        "price_drop": [
+          -0.5
+        ],
+        "price_rise": [
+          0.5
+        ]
       },
       "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
+        "price_drop": [
+          -1.4
+        ],
+        "price_rise": [
+          1.4
+        ]
       }
     }
   },
@@ -32,25 +48,49 @@
     "common": true,
     "thresholds": {
       "60": {
-        "price_drop": [-1.3],
-        "price_rise": [1.3]
+        "price_drop": [
+          -1.3
+        ],
+        "price_rise": [
+          1.3
+        ]
       },
       "100": {
-        "price_drop": [-2.5],
-        "price_rise": [2.5]
+        "price_drop": [
+          -2.5
+        ],
+        "price_rise": [
+          2.5
+        ]
       },
       "120": {
-        "price_drop": [-3.4],
-        "price_rise": [3.4]
+        "price_drop": [
+          -3.4
+        ],
+        "price_rise": [
+          3.4
+        ]
       }
     },
     "price_thresholds": [
-      {"price": 5.5, "direction": "above"},
-      {"price": 4.8, "direction": "below"}
+      {
+        "price": 5.5,
+        "direction": "above"
+      },
+      {
+        "price": 4.8,
+        "direction": "below"
+      }
     ],
     "change_thresholds": [
-      {"change": 3.0, "direction": "above"},
-      {"change": -2.5, "direction": "below"}
+      {
+        "change": 3.0,
+        "direction": "above"
+      },
+      {
+        "change": -2.5,
+        "direction": "below"
+      }
     ]
   },
   "600111.SH": {
@@ -67,11 +107,10 @@
     "common": false,
     "ma": true
   },
-    "513780.SH": {
+  "513780.SH": {
     "name": "创新药",
     "common": true,
     "ma": true
-
   },
   "513000.SH": {
     "name": "日经指数",
@@ -79,12 +118,20 @@
     "ma": true,
     "thresholds": {
       "100": {
-        "price_drop": [-0.5],
-        "price_rise": [0.5]
+        "price_drop": [
+          -0.5
+        ],
+        "price_rise": [
+          0.5
+        ]
       },
       "120": {
-        "price_drop": [-1.4],
-        "price_rise": [1.4]
+        "price_drop": [
+          -1.4
+        ],
+        "price_rise": [
+          1.4
+        ]
       }
     }
   },
@@ -92,16 +139,21 @@
     "name": "东南亚",
     "common": false,
     "ma": true
-
   },
-    "159742.SZ": {
+  "159742.SZ": {
     "name": "恒生科技",
     "common": false,
     "ma": true
   },
-  "002966.SZ": {
-    "name": "苏州银行",
-    "common": false,
+  "600104.SH": {
+    "name": "上汽集团",
+    "common": true,
     "ma": true
-  }
+  },
+  "price_thresholds": [
+    {
+      "price": 18.61,
+      "direction": "below"
+    }
+  ]
 }
