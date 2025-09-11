@@ -5,6 +5,7 @@ from dto.RealTimeStockData import RealTimeStockData
 from datetime import datetime  # 正确导入 datetime 类
 import warnings
 import ssl
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
 from utils.GetStockData import result
@@ -13,6 +14,7 @@ import json  # python自带的json数据库
 from random import randint  # python自带的随机数库
 import pandas as pd
 from utils.date_utils import Date_utils
+
 pd.set_option('expand_frame_repr', False)  # 当列太多时不换行
 
 # 获取当前脚本的完整路径
@@ -27,13 +29,11 @@ parent_dir_path = os.path.dirname(dir_path)
 # 构造相对路径
 relative_path = os.path.join(parent_dir_path, 'files')
 
-
-
-token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
+token = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
 
-stock_list  = result
+stock_list = result
 ma_cache = {}
 
 
@@ -41,47 +41,36 @@ class IndexAnalysis:
     def __init__(self):
         pass
 
-
     @staticmethod
     def get_stock_daily(ts_code, start_date, end_date=None):
         if end_date is None:
             end_date = start_date
-        if len(ts_code)==6:
+        if len(ts_code) == 6:
             ts_code = stock_list[stock_list['symbol'] == ts_code]['ts_code'].tolist()[0]
         if not end_date:
             end_date = datetime.now().strftime('%Y%m%d')
-        v= ts.pro_bar(ts_code=ts_code, adj='qfq', start_date=start_date, end_date=end_date)
-        if v is None or  v.empty:
+        v = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date=start_date, end_date=end_date)
+        if v is None or v.empty:
             return None
         # 将日期列转换为 datetime 类型，并设置为索引
         return StockDataDay.from_daily_dataframe(v)
 
     @staticmethod
-    def calculate_pct(ts_code, start_date, end_date):
-        df = ts.pro_bar(ts_code=ts_code, adj='qfq', start_date=start_date, end_date=end_date)
-        change_pct =df['pct_chg'].sum()
-        return change_pct
-
-    @staticmethod
     def realtime_quote(ts_code):
-        v:pd = ts.realtime_quote(ts_code=ts_code)
+        v: pd = ts.realtime_quote(ts_code=ts_code)
         arr = []
         for item in v.iterrows():
             arr.append(RealTimeStockData.from_dataframe(item[1].to_frame().T))
         return arr
 
     @staticmethod
-    def stk_limit(date):
-        df = pro.stk_limit(date)
-        return df
-    @staticmethod
-    def stk_factor(ts_code,date):
+    def stk_factor(ts_code, date):
         df = pro.stk_factor(ts_code=ts_code, start_date=date, end_date=date,
                             fields='ts_code,trade_date,rsi_6,rsi_12,rsi_24,kdj_j')
         return df
 
     @staticmethod
-    def rt_min(stock_code,k_type=1,num=320):
+    def rt_min(stock_code, k_type=1, num=320):
         # num最多不能超过320
         # =====获取分钟级别的K线
         # 获取K线数据：http://ifzq.gtimg.cn/appstock/app/kline/mkline?param=sz000001,m5,,640&_var=m5_today&r=0.6508601564534552
@@ -96,10 +85,10 @@ class IndexAnalysis:
         k_type = k_type  # 1, 5, 15, 30, 60
         start = 10 ** (16 - 1)
         end = (10 ** 16) - 1
-        random_num =str(randint(start, end))
+        random_num = str(randint(start, end))
         # 构建url
         url = 'http://ifzq.gtimg.cn/appstock/app/kline/mkline?param=%s,m%s,,%s&_var=m%s_today&r=0.%s'
-        url = url % (stock_code, k_type, num, k_type,random_num)
+        url = url % (stock_code, k_type, num, k_type, random_num)
 
         # ===获取数据
         import ssl
@@ -127,19 +116,22 @@ class IndexAnalysis:
 
         return df
 
-        # ===考察其他周期、指数、ETF
-
-        # ===考察特殊情况
-        # 正常股票：sz000001 sz000002，退市股票：sh600002 sz000003、停牌股票：sz300124，上市新股：sz002952，除权股票：sh600276，
-
     @staticmethod
-    def get_ma(stock_code):
-        ma_cache = {}
+    def my_pro_bar(stock_code, start_date=None, end_date=None):
         # 检查缓存中是否存在且未过期（假设缓存1小时）
+        ma_cache = {}
         cache_key = f"ma_{stock_code}"
+
         if cache_key in ma_cache:
             return ma_cache[cache_key]
 
+        # 如果用户没有传入开始/结束日期，使用默认逻辑计算
+        if start_date is None:
+            start_date = Date_utils.get_date_by_step(Date_utils.get_today(replace=False), -130, True)
+        if end_date is None:
+            end_date = Date_utils.get_today(replace=True)
+
+        # 判断资产类型
         if stock_code.endswith('.SH'):
             if stock_code[:3] in ['000', '999']:
                 asset_type = 'I'
@@ -160,26 +152,26 @@ class IndexAnalysis:
                 asset_type = 'E'
         else:
             asset_type = 'E'
+
         # 缓存中没有或已过期，重新获取数据
         data = ts.pro_bar(
             ts_code=stock_code,
             asset=asset_type,  # 使用判断出的资产类型
-            start_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=False), -130, True),
-            end_date=Date_utils.get_today(replace=True),
-            ma=[5, 10, 20, 30, 60, 120])
+            start_date=start_date,
+            end_date=end_date,
+            ma=[5, 10, 20, 30, 60, 120]
+        )
 
         # 存入缓存
         ma_cache[cache_key] = data
         return data
+
+
 # 使用类进行分析
 if __name__ == "__main__":
     # df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='20250509', end_date='20250410')
     # 获取浦发银行60000.SH的历史分钟数据
-    df =IndexAnalysis.rt_min('600000.SH',k_type=1,num=320)
-    print(df)
-
-
-
-
-
+    print(IndexAnalysis.my_pro_bar('159742.SZ',
+                                   start_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=True), -5),
+                                   end_date=Date_utils.get_today(replace=True)))
 

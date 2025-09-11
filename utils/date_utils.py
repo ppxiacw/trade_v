@@ -19,6 +19,14 @@ class Date_utils:
 
     @staticmethod
     def get_date_by_step(date_str, n, replace=False):
+        # 新增逻辑：自动将 'yyyyMMdd' 格式的输入转换为 'yyyy-mm-dd'
+        if '-' not in date_str:
+            # 假设是 8 位数字的日期格式（如：20250101）
+            year = date_str[:4]
+            month = date_str[4:6]
+            day = date_str[6:8]
+            # 替换为标准的带连字符格式
+            date_str = f"{year}-{month}-{day}"
         calendar = Date_utils.get_trade_calendar(date_str[:4])
         start_index = calendar[calendar['trade_date'] == date_str].index[0] if not calendar[
             calendar['trade_date'] == date_str].empty else None
