@@ -148,12 +148,12 @@
   "600104.SH": {
     "name": "上汽集团",
     "common": true,
-    "ma": true
-  },
+    "ma": true,
   "price_thresholds": [
     {
       "price": 18.61,
       "direction": "below"
     }
   ]
+  }
 }
