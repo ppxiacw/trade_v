@@ -190,19 +190,15 @@ class AlertChecker:
         }
         # 获取1分钟K线数据 todo 加入1分钟的
         results_min = IndexAnalysis.rt_min(stock, window)
-        # 如果最后一根k线图不完整，则不返回数据
-        if results_min.iloc[-1]['candle_end_time'] > datetime.now():
-            return results, None
-        # 获取最后三根K线数据
-        last_three = results_min.iloc[-3:]
-        last_k = last_three.iloc[-1]  # 最后一根K线
-        prev_k = last_three.iloc[-2]  # 倒数第二根K线
-        prev_prev_k = last_three.iloc[-3]  # 倒数第三根K线
+        # 获取最后4根K线数据,再取三根，这三根必定是完整数据
+        last_three = results_min.iloc[-4:]
+        last_k = last_three.iloc[-2]  # 最后一根K线
+        prev_k = last_three.iloc[-3]  # 倒数第二根K线
+        prev_prev_k = last_three.iloc[-4]  # 倒数第三根K线
 
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6)
-        if not 30 <= rsi_6 <= 70:
+        if not 20 <= rsi_6 <= 80:
             results["rsi_6"] = rsi_6
-            # 检查吞没形态（阳包阴或阴包阳）
 
         # 1. 检查是否突然放巨量（当前量能是过去平均的3倍）
         avg_volume = results_min['amount'].mean()
@@ -214,6 +210,8 @@ class AlertChecker:
                 last_k['close'] > last_k['open']):
             results["engulfing_up"] = True
 
+
+        # 检查吞没形态（阳包阴或阴包阳）
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
               last_k['close'] < last_k['open']):
