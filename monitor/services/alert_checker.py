@@ -8,7 +8,6 @@ class AlertChecker:
         self.config = config
         self.stock_data = stock_data
 
-
     def check_all_conditions(self, stock):
         alerts = []
 
@@ -120,7 +119,7 @@ class AlertChecker:
         if not self.config.MONITOR_STOCKS[stock].get("break_ma", True):
             return triggered_alerts
         candles = self.stock_data.get_stock_data(stock)
-        ma = IndexAnalysis.pro_bar(stock)[:1]
+        ma = IndexAnalysis.my_pro_bar(stock)[:1]
         if not candles:
             return triggered_alerts
 
@@ -145,7 +144,7 @@ class AlertChecker:
                 # 生成告警消息
                 message = f"{stock} break{ma_type}ma"
 
-                triggered_alerts.append((message,1000*100))
+                triggered_alerts.append((message, 1000 * 100))
 
         return triggered_alerts
 
@@ -193,22 +192,32 @@ class AlertChecker:
         results_min = IndexAnalysis.rt_min(stock, window)
         # 如果最后一根k线图不完整，则不返回数据
         if results_min.iloc[-1]['candle_end_time'] > datetime.now():
-            return results,None
+            return results, None
         # 获取最后三根K线数据
         last_three = results_min.iloc[-3:]
         last_k = last_three.iloc[-1]  # 最后一根K线
         prev_k = last_three.iloc[-2]  # 倒数第二根K线
         prev_prev_k = last_three.iloc[-3]  # 倒数第三根K线
 
-
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6)
-        if not 20 <= rsi_6 <= 80:
+        if not 30 <= rsi_6 <= 70:
             results["rsi_6"] = rsi_6
+            # 检查吞没形态（阳包阴或阴包阳）
+
         # 1. 检查是否突然放巨量（当前量能是过去平均的3倍）
         avg_volume = results_min['amount'].mean()
-
         # 当前成交量超过平均成交量的n倍
         results["sudden_volume"] = last_k['amount'] > 2 * avg_volume and last_k['amount'] > 2 * prev_k['amount']
+
+        # 阳包阴：当前阳线实体完全包裹前一根阴线实体 todo 带上成交量放大的要求
+        if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
+                last_k['close'] > last_k['open']):
+            results["engulfing_up"] = True
+
+        # 阴包阳：当前阴线实体完全包裹前一根阳线实体
+        elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
+              last_k['close'] < last_k['open']):
+            results["engulfing_down"] = True
 
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线
@@ -233,16 +242,5 @@ class AlertChecker:
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
                 results["down_up_down"] = True
-
-        # 4. 检查吞没形态（阳包阴或阴包阳）
-        # 阳包阴：当前阳线实体完全包裹前一根阴线实体
-        if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
-                last_k['close'] > last_k['open']):
-            results["engulfing_up"] = True
-
-        # 阴包阳：当前阴线实体完全包裹前一根阳线实体
-        elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
-              last_k['close'] < last_k['open']):
-            results["engulfing_down"] = True
 
         return results, str(window) + 'min' + str(last_k['candle_end_time'].minute)

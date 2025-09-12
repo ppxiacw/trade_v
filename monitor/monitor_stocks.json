@@ -1,25 +1,7 @@
 {
   "399006.SZ": {
     "name": "创业板指",
-    "common": true,
-    "thresholds": {
-      "100": {
-        "price_drop": [
-          -0.5
-        ],
-        "price_rise": [
-          0.5
-        ]
-      },
-      "120": {
-        "price_drop": [
-          -1.4
-        ],
-        "price_rise": [
-          1.4
-        ]
-      }
-    }
+    "common": true
   },
   "000001.SH": {
     "name": "上证指数",
@@ -27,18 +9,18 @@
     "thresholds": {
       "100": {
         "price_drop": [
-          -0.5
+          -15
         ],
         "price_rise": [
-          0.5
+          15
         ]
       },
       "120": {
         "price_drop": [
-          -1.4
+          -14
         ],
         "price_rise": [
-          1.4
+          14
         ]
       }
     }
@@ -71,36 +53,17 @@
           3.4
         ]
       }
-    },
-    "price_thresholds": [
-      {
-        "price": 5.5,
-        "direction": "above"
-      },
-      {
-        "price": 4.8,
-        "direction": "below"
-      }
-    ],
-    "change_thresholds": [
-      {
-        "change": 3.0,
-        "direction": "above"
-      },
-      {
-        "change": -2.5,
-        "direction": "below"
-      }
-    ]
+    }
   },
   "600111.SH": {
-    "name": "北方稀土"
+    "name": "北方稀土",
+    "common": true,
+    "ma": true
   },
   "000831.SZ": {
-    "name": "中国稀土"
-  },
-  "601012.SH": {
-    "name": "隆基绿能"
+    "name": "中国稀土",
+    "common": true,
+    "ma": true
   },
   "513090.SH": {
     "name": "香港证券",

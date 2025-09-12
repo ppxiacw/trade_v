@@ -14,6 +14,7 @@ import json  # python自带的json数据库
 from random import randint  # python自带的随机数库
 import pandas as pd
 from utils.date_utils import Date_utils
+from datetime import datetime, timedelta
 
 pd.set_option('expand_frame_repr', False)  # 当列太多时不换行
 
@@ -116,6 +117,51 @@ class IndexAnalysis:
 
         return df
 
+
+    @staticmethod
+    def get_volume_ratio(stock_code, k_type=1):
+        """
+        计算今日开盘到当前时刻成交量 / 上一个交易日相同时段成交量
+        :param stock_code: 股票代码（如 '000001.SZ'）
+        :param k_type: K线类型（1分钟、5分钟等）
+        :return: 成交量比值（float），若无昨日数据则返回None
+        """
+        # 获取今日分钟级数据
+        today_df = IndexAnalysis.rt_min(stock_code, k_type=k_type, num=320)
+        if today_df.empty:
+            return None
+
+        # 获取当前时间（用于筛选今日数据）
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+
+        # 筛选今日开盘到当前时刻的数据
+        today_df = today_df[today_df['candle_end_time'].dt.date == now.date()]
+        today_df = today_df[today_df['candle_end_time'].dt.strftime('%H:%M') <= current_time]
+        today_volume = today_df['amount'].sum()  # 今日累计成交量（单位：手）
+
+        # 获取上一个交易日的日期
+        # 从 today_df 中找到离今天最近的日期
+        unique_dates = today_df['candle_end_time'].dt.date.unique()
+        if len(unique_dates) < 2:  # 如果没有足够的历史数据
+            return None
+        last_trading_date = unique_dates[-2]  # 取倒数第二个日期（上一个交易日）
+
+        # 获取上一个交易日的分钟级数据
+        last_trading_df = IndexAnalysis.rt_min(stock_code, k_type=k_type, num=320)
+        if last_trading_df.empty:
+            return None
+
+        # 筛选上一个交易日相同时段的数据
+        last_trading_df = last_trading_df[last_trading_df['candle_end_time'].dt.date == last_trading_date]
+        last_trading_df = last_trading_df[last_trading_df['candle_end_time'].dt.strftime('%H:%M') <= current_time]
+        last_trading_volume = last_trading_df['amount'].sum()  # 上一个交易日累计成交量（单位：手）
+
+        # 计算比值（避免除以0）
+        if last_trading_volume == 0:
+            return None
+        return today_volume / last_trading_volume
+
     @staticmethod
     def my_pro_bar(stock_code, start_date=None, end_date=None):
         # 检查缓存中是否存在且未过期（假设缓存1小时）
@@ -171,7 +217,8 @@ class IndexAnalysis:
 if __name__ == "__main__":
     # df = ts.pro_bar(ts_code='000001.SZ', adj='qfq', ma=[5,10,20,60],start_date='20250509', end_date='20250410')
     # 获取浦发银行60000.SH的历史分钟数据
-    print(IndexAnalysis.my_pro_bar('159742.SZ',
-                                   start_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=True), -5),
-                                   end_date=Date_utils.get_today(replace=True)))
+    # 示例：计算平安银行（000001.SZ）今日成交量与昨日的比值
+    ratio = IndexAnalysis.get_volume_ratio('000831.SZ', k_type=1)
+    print(f"今日成交量/昨日相同时段成交量: {ratio:.2f}" if ratio else "数据不足")
+
 
