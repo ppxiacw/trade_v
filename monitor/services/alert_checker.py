@@ -39,6 +39,18 @@ class AlertChecker:
                     # 非布尔类型且为真值：拼接值
                     alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
                     alerts.append(alert_message)
+        if self.config.MONITOR_STOCKS[stock].get("common", True):
+            common_alerts_30, minutes = self._check_common_by_min(stock, 30)
+            # 处理警报条件：布尔True或非布尔类型
+            for alert_type, is_triggered in common_alerts_30.items():
+                if isinstance(is_triggered, bool) and is_triggered:
+                    # 布尔True：保持原格式
+                    alert_message = f"{stock}: {alert_type} {minutes}"
+                    alerts.append(alert_message)
+                elif not isinstance(is_triggered, bool) and is_triggered:
+                    # 非布尔类型且为真值：拼接值
+                    alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
+                    alerts.append(alert_message)
 
         return alerts
 
@@ -196,7 +208,7 @@ class AlertChecker:
         prev_k = last_three.iloc[-3]  # 倒数第二根K线
         prev_prev_k = last_three.iloc[-4]  # 倒数第三根K线
 
-        rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6)
+        rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6).__round__(1)
         if not 20 <= rsi_6 <= 80:
             results["rsi_6"] = rsi_6
 
@@ -205,16 +217,16 @@ class AlertChecker:
         # 当前成交量超过平均成交量的n倍
         results["sudden_volume"] = last_k['amount'] > 2 * avg_volume and last_k['amount'] > 2 * prev_k['amount']
 
-        # 阳包阴：当前阳线实体完全包裹前一根阴线实体 todo 带上成交量放大的要求
+        # 检查吞没形态（阳包阴或阴包阳）
+        # 阳包阴：当前阳线实体完全包裹前一根阴线实体
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
-                last_k['close'] > last_k['open']):
+            last_k['close'] > last_k['open']) and last_k['amount'] > prev_k['amount']:
             results["engulfing_up"] = True
 
 
-        # 检查吞没形态（阳包阴或阴包阳）
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
-              last_k['close'] < last_k['open']):
+              last_k['close'] < last_k['open']) and last_k['amount'] > prev_k['amount']:
             results["engulfing_down"] = True
 
         # 2. 检查阳线-阴线-阳线组合

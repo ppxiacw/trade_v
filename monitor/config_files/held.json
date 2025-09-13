@@ -1,0 +1,46 @@
+{
+  "600111.SH": {
+    "name": "北方稀土",
+    "common": true,
+    "ma": true,
+    "thresholds": {
+      "20": {
+        "price_drop": [
+          -1.3
+        ],
+        "price_rise": [
+          1.3
+        ]
+      }
+    }
+  },
+  "000831.SZ": {
+    "name": "中国稀土",
+    "common": true,
+    "ma": true,
+    "thresholds": {
+      "20": {
+        "price_drop": [
+          -1.3
+        ],
+        "price_rise": [
+          1.3
+        ]
+      }
+    }
+  },
+  "601933.SH": {
+    "name": "永辉超市",
+    "common": true,
+    "thresholds": {
+      "20": {
+        "price_drop": [
+          -1.3
+        ],
+        "price_rise": [
+          1.3
+        ]
+      }
+    }
+  }
+}
