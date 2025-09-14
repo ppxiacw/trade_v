@@ -16,7 +16,7 @@ try:
 
     # 获取市值数据
     df_daily = pro.daily_basic(
-        trade_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=True),-1),
+        trade_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=True),-1,True),
         fields='ts_code,close,total_mv',
         limit=6000  # 关键：指定获取数据量
     )
