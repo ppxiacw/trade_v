@@ -126,14 +126,19 @@ class IndexAnalysis:
         :param k_type: K线类型（1分钟、5分钟等）
         :return: 成交量比值（float），若无昨日数据则返回None
         """
+        # 获取当前时间（用于筛选今日数据）
+        now = datetime.now()
+        current_time = now.strftime('%H:%M:%S')
+        today = Date_utils.get_today()
+        his_day = Date_utils.get_date_by_step(Date_utils.get_today(),-1)
+        #获取历史分钟代码
+        his_df =  pro.stk_mins(ts_code=stock_code, freq=f'{k_type}min', start_date=f'{his_day} 09:00:00', end_date=f'{his_day} {current_time}')
         # 获取今日分钟级数据
         today_df = IndexAnalysis.rt_min(stock_code, k_type=k_type, num=320)
         if today_df.empty:
             return None
 
-        # 获取当前时间（用于筛选今日数据）
-        now = datetime.now()
-        current_time = now.strftime('%H:%M')
+
 
         # 筛选今日开盘到当前时刻的数据
         today_df = today_df[today_df['candle_end_time'].dt.date == now.date()]
