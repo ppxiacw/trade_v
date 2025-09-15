@@ -210,6 +210,7 @@ class AlertChecker:
 
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min, 6).__round__(1)
         if not 20 <= rsi_6 <= 80:
+            rsi_6 = max(20, min(rsi_6, 80))
             results["rsi_6"] = rsi_6
 
         # 1. 检查是否突然放巨量（当前量能是过去平均的3倍）
