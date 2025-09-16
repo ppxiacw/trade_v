@@ -1,11 +1,13 @@
 {
   "399006.SZ": {
     "name": "创业板指",
-    "common": true
+    "common": true,
+    "ma": true
   },
   "000001.SH": {
     "name": "上证指数",
-    "common": true
+    "common": false,
+    "ma": true
   },
   "513090.SH": {
     "name": "香港证券",
@@ -14,7 +16,7 @@
   },
   "513780.SH": {
     "name": "创新药",
-    "common": true,
+    "common": false,
     "ma": true
   },
   "513000.SH": {
