@@ -48,5 +48,20 @@
     "name": "亚太精选",
     "common": false,
     "ma": true
+  },
+  "600632.SH": {
+    "name": "江西铜业",
+    "common": false,
+    "ma": true
+  },
+  "000737.SZ": {
+    "name": "北方铜业",
+    "common": false,
+    "ma": true
+  },
+  "605398.SH": {
+    "name": "新炬网络",
+    "common": false,
+    "ma": true
   }
 }

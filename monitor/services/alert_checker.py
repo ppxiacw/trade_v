@@ -131,7 +131,8 @@ class AlertChecker:
         if not self.config.MONITOR_STOCKS[stock].get("break_ma", True):
             return triggered_alerts
         candles = self.stock_data.get_stock_data(stock)
-        ma = IndexAnalysis.my_pro_bar(stock)[:1]
+        data = IndexAnalysis.my_pro_bar(stock)
+        ma = IndexAnalysis.calculate_realtime_ma(data,candles[-1])
         if not candles:
             return triggered_alerts
 
