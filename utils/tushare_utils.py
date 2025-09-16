@@ -187,7 +187,7 @@ class IndexAnalysis:
         if stock_code.endswith('.SH'):
             if stock_code[:3] in ['000', '999']:
                 asset_type = 'I'
-            elif stock_code[:2] in ['50', '51']:
+            elif stock_code[:1] in ['5', '51']:
                 asset_type = 'FD'
             elif stock_code[:3] in ['110', '113']:
                 asset_type = 'CB'
@@ -272,7 +272,7 @@ if __name__ == "__main__":
     # 获取浦发银行60000.SH的历史分钟数据
     # 示例：计算平安银行（000001.SZ）今日成交量与昨日的比值
     # ratio = IndexAnalysis.get_volume_ratio('000831.SZ', k_type=1)
-    v =  IndexAnalysis.calculate_realtime_ma(IndexAnalysis.my_pro_bar('399006.SZ'))
+    v =  IndexAnalysis.my_pro_bar('560860.SH')
     print(v)
 
 
