@@ -218,76 +218,52 @@ class IndexAnalysis:
         ma_cache[cache_key] = data
         return data
 
-    def calculate_realtime_ma(data, current_price_dict=None, window_sizes=[5, 10, 20, 30, 60], date_col='trade_date'):
-        """
-        计算实时移动平均线，带时间戳判断
-
-        参数:
-        data: pandas DataFrame，包含历史数据，必须有'close'列和日期列
-        current_price_dict: dict，包含'timestamp'和'price'键，可选，当前最新价格和时间戳
-        window_sizes: list，需要计算的均线周期列表，默认为[5, 10, 20, 30, 60]
-        date_col: str，日期列的名称，默认为'trade_date'
-
-        返回:
-        dict: 包含各周期实时均线值的字典
-        """
-        # 复制数据以避免修改原始DataFrame
-        df = data.copy()
+    def calculate_realtime_ma(df, current_price_dict=None, window_sizes=[5, 10, 20, 30, 60], date_col='trade_date'):
 
         # 确保日期列是datetime类型
         if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
             df[date_col] = pd.to_datetime(df[date_col])
 
+        # 获取最新日期（降序排列的首行）
+        latest_date_in_data = df[date_col].iloc[0]
 
-        # 获取数据中的最新日期
-        latest_date_in_data = df[date_col].iloc[1]
+        # 初始化变量
+        use_current_price = False
+        current_price = None
 
-        # 确定当前价格
-        if current_price_dict is None:
-            # 如果没有提供当前价格，使用DataFrame的最后一个收盘价
-            current_price = df['close'].iloc[-1]
-            # 从历史数据中排除最后一个值（因为它将被包含在当前价格中）
-            close_series = df['close'].iloc[:-1]
-            use_current_price = True
-        else:
-            # 提取当前价格和时间戳
-            current_price = current_price_dict['close']
-            current_timestamp = pd.to_datetime(current_price_dict['timestamp'])
+        # 处理当前价格
+        if current_price_dict:
+            try:
+                current_price = float(current_price_dict['close'])
+                current_timestamp = pd.to_datetime(current_price_dict['timestamp'])
 
-            # 判断时间戳是否与数据中的最新日期重合
-            if current_timestamp.date() == latest_date_in_data.date():
-                # 时间戳重合，不使用当前价格
-                current_price = df['close'].iloc[-1]
-                close_series = df['close'].iloc[:-1]
-                use_current_price = True
-            else:
-                # 时间戳不重合，使用当前价格
-                close_series = df['close']
-                use_current_price = True
+                # 判断是否需要使用当前价格（日期不同）
+                if current_timestamp.date() != latest_date_in_data.date():
+                    use_current_price = True
+            except KeyError:
+                raise ValueError("current_price_dict must contain 'price' and 'timestamp' keys")
 
-        # 计算各周期均线
         ma_values = {}
         for window in window_sizes:
-            # 如果数据量足够计算完整窗口的均线
-            if len(close_series) >= window - 1:
-                # 获取最近(window-1)个历史收盘价
-                recent_closes = close_series.iloc[-(window - 1):].values if window > 1 else []
-
-                # 将当前价格加入计算
-                prices_for_ma = np.append(recent_closes, current_price)
-
-                # 计算均线
-                ma_value = np.mean(prices_for_ma)
+            if use_current_price:
+                required_history = window - 1
+                # 获取最近的历史数据（降序排列的前N条）
+                if len(df) >= required_history:
+                    history_closes = df['close'].iloc[:required_history].values
+                    all_closes = np.append(history_closes, current_price)
+                    ma_value = np.mean(all_closes)
+                else:
+                    ma_value = None  # 数据不足
             else:
-                # 数据量不足时，使用所有可用数据加当前价格计算
-                all_prices = np.append(close_series.values, current_price)
-                ma_value = np.mean(all_prices)
+                # 直接使用历史数据（降序排列的前window条）
+                if len(df) >= window:
+                    ma_value = df['close'].iloc[:window].mean()
+                else:
+                    ma_value = None  # 数据不足
 
             ma_values[f'ma{window}'] = ma_value
 
-        # 添加是否使用了当前价格的标志
         ma_values['used_current_price'] = use_current_price
-
         return ma_values
 
 # 使用类进行分析

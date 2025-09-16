@@ -150,10 +150,9 @@ class AlertChecker:
                 continue
 
             ma_value = ma[ma_key]
-            if len(ma_value) == 0:
-                return []
+
             # 如果当前价格小于等于均线值
-            if current_price <= ma_value[0] < candles[-1]['pre_close']:
+            if current_price <= ma_value < candles[-1]['pre_close']:
                 # 生成告警消息
                 message = f"{stock} break{ma_type}ma"
 
