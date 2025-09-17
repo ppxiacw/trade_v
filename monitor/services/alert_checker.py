@@ -126,7 +126,6 @@ class AlertChecker:
 
     def _check_ma_breakdown(self, stock):
         triggered_alerts = []
-
         """监控股票是否跌破均线"""
         if not self.config.MONITOR_STOCKS[stock].get("break_ma", True):
             return triggered_alerts
@@ -136,8 +135,8 @@ class AlertChecker:
         if not candles:
             return triggered_alerts
 
-        # 获取当前价格
-        current_price = candles[-1]['close']
+        # 获取当日最低价 有些时候可能是瞬时突破，恰好没检测到。可能要加当日最低点的逻辑
+        current_price = candles[-1]['low']
 
         # 获取所有均线配置
         ma_types = self.config.MONITOR_STOCKS[stock].get("ma_types", [5, 10, 20, 30, 60, 120])

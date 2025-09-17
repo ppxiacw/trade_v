@@ -34,7 +34,11 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
         }
     }
     print(str(data))
-    response = requests.post(webhook_url, headers=headers, json=data,verify=False)
+    try:
+        response = requests.post(webhook_url, headers=headers, json=data,verify=False)
+    except Exception as e:
+        print(f"请求异常: {e}")
+        return
 
     if response.status_code == 200:
         pass
