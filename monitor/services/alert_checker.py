@@ -27,7 +27,7 @@ class AlertChecker:
             conditions = self._check_time_window_conditions(stock, window_sec)
             alerts.extend(conditions)
 
-        if self.config.MONITOR_STOCKS[stock].get("common", True):
+        if self.config.MONITOR_STOCKS[stock].get("common", False):
             common_alerts_5, minutes = self._check_common_by_min(stock, 5)
             # 处理警报条件：布尔True或非布尔类型
             for alert_type, is_triggered in common_alerts_5.items():
@@ -50,7 +50,7 @@ class AlertChecker:
                 elif not isinstance(is_triggered, bool) and is_triggered:
                     # 非布尔类型且为真值：拼接值
                     alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
-                    alerts.append(alert_message)
+                    alerts.append((alert_message,60*30))
 
         return alerts
 
@@ -160,6 +160,9 @@ class AlertChecker:
         return triggered_alerts
 
     def _check_change_thresholds(self, stock):
+        change_thresholds = self.config.MONITOR_STOCKS[stock].get("change_thresholds", [])
+        if len(change_thresholds) == 0:
+            return []
         triggered_alerts = []
         candles = self.stock_data.get_stock_data(stock)
 
@@ -171,7 +174,6 @@ class AlertChecker:
 
         change_percent = (current_price - pre_close) / pre_close * 100
 
-        change_thresholds = self.config.MONITOR_STOCKS[stock].get("change_thresholds", [])
 
         for threshold_config in change_thresholds:
             threshold_change = threshold_config["change"]
@@ -199,7 +201,6 @@ class AlertChecker:
             "engulfing_down": False,  # 阴吞没形态
             "rsi_6_value": False
         }
-        # 获取1分钟K线数据 todo 加入1分钟的
         results_min = IndexAnalysis.rt_min(stock, window)
         # 获取最后4根K线数据,再取三根，这三根必定是完整数据
         last_three = results_min.iloc[-4:]

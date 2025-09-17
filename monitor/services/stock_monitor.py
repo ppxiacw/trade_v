@@ -14,10 +14,9 @@ class StockMonitor:
 
     def start_monitoring(self):
         print(f"开始监控 {len(self.config.MONITOR_STOCKS)} 个")
-
+        stock_codes = list(self.config.MONITOR_STOCKS.keys())
         while True:
             try:
-                stock_codes = list(self.config.MONITOR_STOCKS.keys())
                 data_list = self.data_fetcher.fetch_realtime_data(stock_codes)
 
                 if len(data_list) != 0:
@@ -29,7 +28,5 @@ class StockMonitor:
                         if alerts:
                             self.alert_sender.send_alert(stock, alerts)
 
-                time.sleep(self.config.BASE_INTERVAL)
-            except KeyboardInterrupt:
-                print("\n监控已停止")
-                break
+            except Exception as e:
+                print(e)
