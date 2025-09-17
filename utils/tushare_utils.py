@@ -170,8 +170,6 @@ class IndexAnalysis:
 
     @staticmethod
     def my_pro_bar(stock_code, start_date=None, end_date=None):
-        # 检查缓存中是否存在且未过期（假设缓存1小时）
-        ma_cache = {}
         cache_key = f"ma_{stock_code}"
 
         if cache_key in ma_cache:
