@@ -21,7 +21,6 @@ class StockMonitor:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
         while True:
-            try:
 
                 # 获取数据
                 data_list = self.data_fetcher.fetch_realtime_data(stock_codes)
@@ -43,9 +42,6 @@ class StockMonitor:
 
 
 
-            except Exception as e:
-                print(f"监控循环出错: {str(e)}")
-                time.sleep(5)  # 出错时暂停5秒再重试
 
     def check_and_send_alerts(self, stock):
         """并行检查并发送警报的辅助方法"""

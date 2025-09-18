@@ -13,49 +13,5 @@
         ]
       }
     }
-  },
-  "600362.SH": {
-    "name": "江西铜业",
-    "common": true,
-    "ma": true,
-    "thresholds": {
-      "5": {
-        "price_drop": [
-          -0.7
-        ],
-        "price_rise": [
-          0.7
-        ]
-      }
-    }
-  },
-  "000831.SZ": {
-    "name": "中国稀土",
-    "common": true,
-    "ma": true,
-    "thresholds": {
-      "5": {
-        "price_drop": [
-          -0.7
-        ],
-        "price_rise": [
-          0.7
-        ]
-      }
-    }
-  },
-  "600.73.SH": {
-    "name": "永辉超市",
-    "common": true,
-    "thresholds": {
-      "5": {
-        "price_drop": [
-          -0.7
-        ],
-        "price_rise": [
-          0.7
-        ]
-      }
-    }
   }
 }
