@@ -63,5 +63,9 @@
     "name": "有色etf",
     "common": true,
     "ma": true
+  },
+   "601138.SH": {
+    "name": "工业富联",
+    "ma": true
   }
 }

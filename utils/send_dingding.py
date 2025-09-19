@@ -33,11 +33,12 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
             "btnOrientation": "1"  # 设置按钮垂直排列，如果按钮多的话
         }
     }
-    print(title)
+    print(title+"\n")
+    return
     try:
         response = requests.post(webhook_url, headers=headers, json=data,verify=False)
     except Exception as e:
-        print(f"请求异常: {e}")
+        print(f"发送消息失败: {e}")
         return
 
     if response.status_code == 200:
