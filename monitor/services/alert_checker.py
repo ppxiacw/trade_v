@@ -39,6 +39,17 @@ class AlertChecker:
                     # 非布尔类型且为真值：拼接值
                     alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
                     alerts.append(alert_message)
+            common_alerts_1, minutes = self._check_common_by_min(stock, 1)
+            # 处理警报条件：布尔True或非布尔类型
+            for alert_type, is_triggered in common_alerts_1.items():
+                if isinstance(is_triggered, bool) and is_triggered:
+                    # 布尔True：保持原格式
+                    alert_message = f"{stock}: {alert_type} {minutes}"
+                    alerts.append(alert_message)
+                elif not isinstance(is_triggered, bool) and is_triggered:
+                    # 非布尔类型且为真值：拼接值
+                    alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
+                    alerts.append(alert_message)
 
         return alerts
 
