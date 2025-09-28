@@ -28,28 +28,11 @@ class AlertChecker:
             alerts.extend(conditions)
 
         if self.config.MONITOR_STOCKS[stock].get("common", False):
-            common_alerts_5, minutes = self._check_common_by_min(stock, 5)
+            common_alerts_5 = self._check_common_by_min(stock, 5)
+            alerts.extend(common_alerts_5)
+            common_alerts_1 = self._check_common_by_min(stock, 1)
             # 处理警报条件：布尔True或非布尔类型
-            for alert_type, is_triggered in common_alerts_5.items():
-                if isinstance(is_triggered, bool) and is_triggered:
-                    # 布尔True：保持原格式
-                    alert_message = f"{stock}: {alert_type} {minutes}"
-                    alerts.append(alert_message)
-                elif not isinstance(is_triggered, bool) and is_triggered:
-                    # 非布尔类型且为真值：拼接值
-                    alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
-                    alerts.append(alert_message)
-            common_alerts_1, minutes = self._check_common_by_min(stock, 1)
-            # 处理警报条件：布尔True或非布尔类型
-            for alert_type, is_triggered in common_alerts_1.items():
-                if isinstance(is_triggered, bool) and is_triggered:
-                    # 布尔True：保持原格式
-                    alert_message = f"{stock}: {alert_type} {minutes}"
-                    alerts.append(alert_message)
-                elif not isinstance(is_triggered, bool) and is_triggered:
-                    # 非布尔类型且为真值：拼接值
-                    alert_message = f"{stock}: {alert_type}: {is_triggered} {minutes}"
-                    alerts.append(alert_message)
+            alerts.extend(common_alerts_1)
 
         return alerts
 
@@ -191,17 +174,7 @@ class AlertChecker:
         return triggered_alerts
 
     def _check_common_by_min(self, stock, window=1):
-        # 初始化结果字典
-        results = {
-            "sudden_volume": False,  # 是否突然放巨量
-            "up_down_up": False,  # 阳-阴-阳组合
-            "down_up_down": False,  # 阴-阳-阴组合
-            "engulfing_up": False,  # 阳吞没形态
-            "engulfing_down": False,  # 阴吞没形态
-            "rsi_6_value": False,
-            "rsi_6_up": False,
-            "rsi_6_down": False,
-        }
+        result_arr = []
         results_min = IndexAnalysis.rt_min(stock, window)
         # 获取最后4根K线数据,再取三根，这三根必定是完整数据
         last_three = results_min.iloc[-4:]
@@ -211,33 +184,36 @@ class AlertChecker:
 
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-1], 6).__round__(1)
         pre_rsi_6  = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
-        if not 20 <= rsi_6 <= 80:
+        if not 20 <= rsi_6 <= 21:
             rsi_6 = max(20, min(rsi_6, 80))
-            results["rsi_6"] = rsi_6
+            result_arr.append((f"({window}min)rsi_6:{rsi_6}",window*60))
 
         if not 20 <= pre_rsi_6 <= 80:
             # 检查吞没形态（阳包阴或阴包阳）
             # 放量阴-阳
             if (prev_k['close'] < prev_k['open'] and  # 前一根是阴线
                 last_k['close'] >= last_k['open']) and last_k['amount'] > prev_k['amount']:
-                results["rsi_6_up"] = True
+                result_arr.append((f"({window}min)rsi_6_up", window * 60))
 
             # 放量阳-阴
             elif (prev_k['close'] > prev_k['open']  and  # 前一根是阳线
                   last_k['close'] <= last_k['open']) and last_k['amount'] > prev_k['amount']:
-                results["rsi_6_down"] = True
+                result_arr.append((f"({window}min)rsi_6_down", window * 60))
+
 
         # 检查吞没形态（阳包阴或阴包阳）
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
             last_k['close'] >last_k['open']) and last_k['amount'] > prev_k['amount']:
-            results["engulfing_up"] = True
+            result_arr.append((f"({window}min)engulfing_up", window * 60))
+
 
 
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
               last_k['close'] < last_k['open']) and last_k['amount'] > prev_k['amount']:
-            results["engulfing_down"] = True
+            result_arr.append((f"({window}min)engulfing_down", window * 60))
+
 
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线
@@ -249,7 +225,7 @@ class AlertChecker:
             # 检查成交量：两个阳线成交量都大于中间的阴线
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
-                results["up_down_up"] = True
+                result_arr.append((f"({window}min)up_down_up", window * 60))
 
         # 3. 检查阴线-阳线-阴线组合
         # 形态要求：阴线 → 阳线 → 阴线
@@ -261,6 +237,6 @@ class AlertChecker:
             # 检查成交量：两个阴线成交量都大于中间的阳线
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
-                results["down_up_down"] = True
+                result_arr.append((f"({window}min)down_up_down", window * 60))
 
-        return results, str(window) + 'min' + str(last_k['candle_end_time'].minute)
+        return result_arr

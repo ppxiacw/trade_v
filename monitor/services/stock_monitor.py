@@ -55,9 +55,6 @@ class StockMonitor:
 
     def check_and_send_alerts(self, stock):
         """并行检查并发送警报的辅助方法"""
-        try:
-            alerts = self.alert_checker.check_all_conditions(stock)
-            if alerts:
-                self.alert_sender.send_alert(stock, alerts)
-        except Exception as e:
-            print(f"检查股票{alerts}警报时出错: {str(e)}")
+        alerts = self.alert_checker.check_all_conditions(stock)
+        if alerts:
+            self.alert_sender.send_alert(stock, alerts)
