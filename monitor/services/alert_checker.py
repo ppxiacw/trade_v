@@ -183,10 +183,36 @@ class AlertChecker:
 
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-1], 6).__round__(1)
         pre_rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
-        if not 20 <= rsi_6 <= 80:
-            rsi_6 = max(20, min(rsi_6, 80))
-            result_arr.append((f"({window}min)rsi_6:{rsi_6}", window * 60))
 
+         # 初始化或获取RSI触发状态
+        if not hasattr(self, '_rsi_trigger_states'):
+            self._rsi_trigger_states = {}  # 存储每个window的RSI触发状态
+
+        state_key = f"{stock}_{window}"
+        if state_key not in self._rsi_trigger_states:
+            # 第一次检查，标记为需要触发
+            self._rsi_trigger_states[state_key] = {
+                'last_rsi_triggered': False
+            }
+
+        # 获取当前状态
+        current_state = self._rsi_trigger_states[state_key]
+
+
+        # 修改RSI判断逻辑：检查是否连续触发
+        if not 20 <= rsi_6 <= 80:
+            # 检查是否连续触发：当前和前一期RSI都不在正常范围内
+            is_consecutive_trigger = (pre_rsi_6 is not None and
+                                      not 20 <= pre_rsi_6 <= 80)
+
+            if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
+                rsi_6 = max(20, min(rsi_6, 80))
+                result_arr.append((f"({window}min)rsi_6:{rsi_6}====={time}", window * 60))
+                current_state['last_rsi_triggered'] = True
+            else:
+                current_state['last_rsi_triggered'] = True  # 更新状态但不触发
+        else:
+            current_state['last_rsi_triggered'] = False  # RSI回到正常范围，重置状态
         if not 20 <= pre_rsi_6 <= 80:
             # 检查吞没形态（阳包阴或阴包阳）
             # 放量阴-阳
