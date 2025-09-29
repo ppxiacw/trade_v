@@ -207,7 +207,7 @@ class AlertChecker:
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 rsi_6 = max(20, min(rsi_6, 80))
-                result_arr.append((f"({window}min)rsi_6:{rsi_6}====={time}", window * 60))
+                result_arr.append((f"({window}min)rsi_6:{rsi_6}", window * 60))
                 current_state['last_rsi_triggered'] = True
             else:
                 current_state['last_rsi_triggered'] = True  # 更新状态但不触发
