@@ -1,10 +1,10 @@
 {
-  "601138.SH": {
-    "name": "工业富联",
+  "600143.SH": {
+    "name": "金发科技",
     "common": true,
     "ma": true,
     "thresholds": {
-      "5": {
+      "20": {
         "price_drop": [
           -0.7
         ],

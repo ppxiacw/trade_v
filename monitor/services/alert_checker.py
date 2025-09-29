@@ -113,7 +113,7 @@ class AlertChecker:
             return triggered_alerts
         candles = self.stock_data.get_stock_data(stock)
         data = IndexAnalysis.my_pro_bar(stock)
-        ma = IndexAnalysis.calculate_realtime_ma(data,candles[-1])
+        ma = IndexAnalysis.calculate_realtime_ma(data, candles[-1])
         if not candles:
             return triggered_alerts
 
@@ -156,7 +156,6 @@ class AlertChecker:
 
         change_percent = (current_price - pre_close) / pre_close * 100
 
-
         for threshold_config in change_thresholds:
             threshold_change = threshold_config["change"]
             direction = threshold_config["direction"]
@@ -183,10 +182,10 @@ class AlertChecker:
         prev_prev_k = last_three.iloc[-4]  # 倒数第三根K线
 
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-1], 6).__round__(1)
-        pre_rsi_6  = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
-        if not 20 <= rsi_6 <= 21:
+        pre_rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
+        if not 20 <= rsi_6 <= 80:
             rsi_6 = max(20, min(rsi_6, 80))
-            result_arr.append((f"({window}min)rsi_6:{rsi_6}",window*60))
+            result_arr.append((f"({window}min)rsi_6:{rsi_6}", window * 60))
 
         if not 20 <= pre_rsi_6 <= 80:
             # 检查吞没形态（阳包阴或阴包阳）
@@ -196,15 +195,14 @@ class AlertChecker:
                 result_arr.append((f"({window}min)rsi_6_up", window * 60))
 
             # 放量阳-阴
-            elif (prev_k['close'] > prev_k['open']  and  # 前一根是阳线
+            elif (prev_k['close'] > prev_k['open'] and  # 前一根是阳线
                   last_k['close'] <= last_k['open']) and last_k['amount'] > prev_k['amount']:
                 result_arr.append((f"({window}min)rsi_6_down", window * 60))
-
 
         # 检查吞没形态（阳包阴或阴包阳）
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
-            last_k['close'] >last_k['open']) and last_k['amount'] > prev_k['amount']:
+            last_k['close'] > last_k['open']) and last_k['amount'] > prev_k['amount']:
             result_arr.append((f"({window}min)engulfing_up", window * 60))
 
 
@@ -214,13 +212,13 @@ class AlertChecker:
               last_k['close'] < last_k['open']) and last_k['amount'] > prev_k['amount']:
             result_arr.append((f"({window}min)engulfing_down", window * 60))
 
-
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线
         # 量能要求：两个阳线的成交量都大于中间的阴线
-        if (prev_prev_k['close'] > prev_prev_k['open'] and  # 第一根阳线
-                prev_k['close'] < prev_k['open'] and  # 第二根阴线
-                last_k['close'] > last_k['open']):  # 第三根阳线
+        if (window != 1 and
+            prev_prev_k['close'] > prev_prev_k['open'] and  # 第一根阳线
+            prev_k['close'] < prev_k['open'] and  # 第二根阴线
+            last_k['close'] > last_k['open']):  # 第三根阳线
 
             # 检查成交量：两个阳线成交量都大于中间的阴线
             if (prev_prev_k['amount'] > prev_k['amount'] and
@@ -230,9 +228,10 @@ class AlertChecker:
         # 3. 检查阴线-阳线-阴线组合
         # 形态要求：阴线 → 阳线 → 阴线
         # 量能要求：两个阴线的成交量都大于中间的阳线
-        if (prev_prev_k['close'] < prev_prev_k['open'] and  # 第一根阴线
-                prev_k['close'] > prev_k['open'] and  # 第二根阳线
-                last_k['close'] < last_k['open']):  # 第三根阴线
+        if (window != 1 and
+            prev_prev_k['close'] < prev_prev_k['open'] and  # 第一根阴线
+            prev_k['close'] > prev_k['open'] and  # 第二根阳线
+            last_k['close'] < last_k['open']):  # 第三根阴线
 
             # 检查成交量：两个阴线成交量都大于中间的阳线
             if (prev_prev_k['amount'] > prev_k['amount'] and
