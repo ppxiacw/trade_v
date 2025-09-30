@@ -173,8 +173,27 @@ class AlertChecker:
         return triggered_alerts
 
     def _check_common_by_min(self, stock, window=1):
+        # 确保类实例存在状态字典，用于记录各股票的最新时间戳
+        if not hasattr(self, '_last_candle_times'):
+            self._last_candle_times = {}
+
         result_arr = []
         results_min = IndexAnalysis.rt_min(stock, window)
+
+
+        # 获取最后一个元素的candle_end_time
+        last_candle = results_min.iloc[-1]
+        current_time = last_candle['candle_end_time']
+
+        # 获取该股票上一次记录的时间戳（若无则设为None）
+        last_time = self._last_candle_times.get(stock+'_'+str(window))
+
+        # 仅当时间戳更新时执行后续逻辑
+        if last_time is None or current_time > last_time:
+            # 更新记录的时间戳
+            self._last_candle_times[stock+'_'+str(window)] = current_time
+        else:
+            return result_arr
         # 获取最后4根K线数据,再取三根，这三根必定是完整数据
         last_three = results_min.iloc[-4:]
         last_k = last_three.iloc[-2]  # 最后一根K线
@@ -207,7 +226,7 @@ class AlertChecker:
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 rsi_6 = max(20, min(rsi_6, 80))
-                result_arr.append((f"({window}min)rsi_6:{rsi_6}", window * 60))
+                result_arr.append(f"({window}min)rsi_6:{rsi_6}")
                 current_state['last_rsi_triggered'] = True
             else:
                 current_state['last_rsi_triggered'] = True  # 更新状态但不触发
@@ -218,25 +237,25 @@ class AlertChecker:
             # 放量阴-阳
             if (prev_k['close'] < prev_k['open'] and  # 前一根是阴线
                 last_k['close'] >= last_k['open']) and last_k['amount'] > prev_k['amount']:
-                result_arr.append((f"({window}min)rsi_6_up", window * 60))
+                result_arr.append(f"({window}min)rsi_6_up")
 
             # 放量阳-阴
             elif (prev_k['close'] > prev_k['open'] and  # 前一根是阳线
                   last_k['close'] <= last_k['open']) and last_k['amount'] > prev_k['amount']:
-                result_arr.append((f"({window}min)rsi_6_down", window * 60))
+                result_arr.append(f"({window}min)rsi_6_down")
 
         # 检查吞没形态（阳包阴或阴包阳）
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
             last_k['close'] > last_k['open']) and last_k['amount'] > prev_k['amount']:
-            result_arr.append((f"({window}min)engulfing_up", window * 60))
+            result_arr.append(f"({window}min)engulfing_up")
 
 
 
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
               last_k['close'] < last_k['open']) and last_k['amount'] > prev_k['amount']:
-            result_arr.append((f"({window}min)engulfing_down", window * 60))
+            result_arr.append(f"({window}min)engulfing_down")
 
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线
@@ -249,7 +268,7 @@ class AlertChecker:
             # 检查成交量：两个阳线成交量都大于中间的阴线
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
-                result_arr.append((f"({window}min)up_down_up", window * 60))
+                result_arr.append(f"({window}min)up_down_up")
 
         # 3. 检查阴线-阳线-阴线组合
         # 形态要求：阴线 → 阳线 → 阴线
@@ -262,6 +281,6 @@ class AlertChecker:
             # 检查成交量：两个阴线成交量都大于中间的阳线
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
-                result_arr.append((f"({window}min)down_up_down", window * 60))
+                result_arr.append(f"({window}min)down_up_down")
 
         return result_arr
