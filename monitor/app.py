@@ -3,6 +3,8 @@ import os
 from flask import Flask, jsonify
 import urllib3
 from urllib3.exceptions import InsecureRequestWarning
+from utils.tushare_utils import IndexAnalysis
+from flask_cors import CORS
 
 # 禁用 HTTPS 不安全请求警告
 urllib3.disable_warnings(InsecureRequestWarning)# 添加项目根目录到 Python 路径
@@ -17,6 +19,7 @@ from services.stock_monitor import StockMonitor
 import threading
 
 app = Flask(__name__)
+CORS(app)
 
 # 初始化配置和组件
 config = Config()
@@ -29,12 +32,9 @@ alert_sender = AlertSender(config)
 monitor = StockMonitor(config, data_fetcher, alert_checker, alert_sender, stock_data)
 
 
-@app.route('/api/alerts')
+@app.route('/rt_min')
 def get_alerts():
-    return jsonify({
-        'status': 'success',
-        'alerts': alert_sender.get_alert_history()
-    })
+    return {"000001.SH":"上证指数","data":IndexAnalysis.rt_min('000001.SH',1).to_dict(orient='records')}
 
 
 @app.route('/api/manual_trigger_detection')

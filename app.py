@@ -4,6 +4,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from pattern.TestShape import find_bottom_line,find_shrinkage,find_shirnkage_after
 from apscheduler.triggers.cron import CronTrigger
 from trade_schedule import AppendMarketData
+from utils.tushare_utils import IndexAnalysis
 
 # 全局初始化调度器
 scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
@@ -16,9 +17,9 @@ def create_app():
     app.logger.setLevel(logging.INFO)
 
     # 注册路由
-    @app.route('/find_bottom_line')
-    def find_bottom_line_route():
-        return find_bottom_line()
+    @app.route('/rt_min')
+    def rt_min():
+        return IndexAnalysis.rt_min('000001.SH',1)
 
 
 
@@ -29,35 +30,6 @@ def create_app():
         return find_shrinkage()
 
 
-    @app.route('/shirnkage_after')
-    def find_shrinkage_after_route():
-        app.logger.info("开始执行 find_shrinkage_after")
-        return find_shirnkage_after()
-
-    # 初始化调度器（仅在应用上下文中执行一次）
-    with app.app_context():
-        if not scheduler.running:
-            # 添加每天16:00执行的任务
-            # scheduler.add_job(
-            #     schedule_append_market_data,
-            #     trigger='interval',
-            #     minutes=2,
-            #     id="daily_4pm_schedule_append_market_data"
-            # )
-            scheduler.add_job(
-                find_shrinkage_route,
-                trigger='interval',
-                minutes=5,
-                id="find_shrinkage_route"
-            )
-            scheduler.add_job(
-                find_bottom_line_route,
-                trigger='interval',
-                minutes=5,
-                id="find_bottom_line_route"
-            )
-
-            scheduler.start()
 
     return app
 

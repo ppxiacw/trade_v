@@ -170,7 +170,8 @@ class IndexAnalysis:
 
     @staticmethod
     def my_pro_bar(stock_code, start_date=None, end_date=None):
-        cache_key = f"ma_{stock_code}"
+        # 创建包含所有三个参数的缓存键
+        cache_key = f"ma_{stock_code}_{start_date}_{end_date}"
 
         if cache_key in ma_cache:
             return ma_cache[cache_key]
