@@ -5,6 +5,7 @@ class Config:
     def __init__(self):
         self.TUSHARE_TOKEN = "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5"
         self.BASE_INTERVAL = 1  # 基础数据收集间隔(秒)
+        self.CONFIG_LIST = None
         self.DATA_RETENTION_HOURS = 10  # 保留多少小时的数据
         self.DEBUG_MODE = False  # 调试模式开关
         self.ALERT_COOLDOWN = 300  # 警报冷却时间（秒），5分钟内不重复发送相同警报
@@ -40,7 +41,7 @@ class Config:
 
                 if "change_thresholds" not in stock_config:
                     stock_config["change_thresholds"] = []
-
+            self.CONFIG_LIST = config
             return config
         except FileNotFoundError:
             print("警告: 配置文件文件夹未找到")

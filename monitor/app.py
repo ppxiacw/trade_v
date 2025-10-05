@@ -3,6 +3,8 @@ import os
 from flask import Flask, jsonify
 import urllib3
 from urllib3.exceptions import InsecureRequestWarning
+
+from monitor.services.volume_radio import get_volume_ratio_simple
 from utils.tushare_utils import IndexAnalysis
 from flask_cors import CORS
 
@@ -31,16 +33,19 @@ alert_sender = AlertSender(config)
 # 创建监控器
 monitor = StockMonitor(config, data_fetcher, alert_checker, alert_sender, stock_data)
 
-
 @app.route('/rt_min')
 def get_alerts():
     return {"000001.SH":"上证指数","data":IndexAnalysis.rt_min('000001.SH',1).to_dict(orient='records')}
 
 
-@app.route('/api/manual_trigger_detection')
-def manual_input():
-    # 这里需要实现手动触发检测的逻辑
-    return "手动触发功能"
+@app.route('/api/volume_ratio', methods=['GET'])
+@app.route('/api/volume_ratio/<string:stock_codes>', methods=['GET'])
+def volume_ratio(stock_codes=None):
+    if stock_codes is None:
+        stock_codes = list(config.CONFIG_LIST.keys())
+    else:
+        stock_codes = stock_codes.split(',')
+    return get_volume_ratio_simple(stock_codes)
 
 
 @app.route('/api/reload_config')
