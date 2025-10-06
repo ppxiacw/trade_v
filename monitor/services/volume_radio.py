@@ -7,7 +7,7 @@ from functools import lru_cache
 from collections import OrderedDict
 # 假设您有Date_utils模块，包含get_date_by_step和get_today方法
 from utils.date_utils import Date_utils
-
+from utils.GetStockData import get_stock_name
 
 # 缓存历史成交量数据，避免重复请求
 class VolumeCache:
@@ -179,6 +179,7 @@ def format_volume_data_table(data_dict):
     for stock, info in data_dict.items():
         row_line = "|"
         row_line += f" {stock:<{col_widths[0] - 1}}|"
+        row_line += f" {get_stock_name(stock):>{col_widths[1] - 2}} |"
         row_line += f" {info['today_volume']:>{col_widths[1] - 2},.2f} |"
         row_line += f" {info['previous_volume']:>{col_widths[2] - 2},.2f} |"
         row_line += f" {info['volume_ratio']:>{col_widths[3] - 2}.4f} |"
@@ -188,7 +189,6 @@ def format_volume_data_table(data_dict):
 
     table_lines.append(separator)
     print("\n".join(table_lines))
-    return "\n".join(table_lines)
 
 
 # 修改原函数以返回表格
@@ -198,9 +198,6 @@ def get_volume_ratio_simple(stock_list, current_time=None):
     """
     full_data = get_volume_ratio_batch(stock_list, current_time)
 
-    # 打印原始数据
-    for stock, data in full_data.items():
-        print(f"{stock}: {data['volume_ratio']:.2f}")
 
     # 返回表格形式的字符串
     return format_volume_data_table(full_data)
