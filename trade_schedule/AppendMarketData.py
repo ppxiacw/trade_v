@@ -1,12 +1,11 @@
 import os
 
 import pandas as pd
-from utils.tushare_utils import ts
+from utils.tushare_utils import ts,token
 from config.dbconfig import engine
 
 
 from utils.date_utils import Date_utils
-token  = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 ts.set_token(token)
 pro = ts.pro_api(token)
 analysis = Date_utils()

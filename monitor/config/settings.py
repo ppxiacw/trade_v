@@ -1,9 +1,10 @@
 import os
 import json
+from utils.tushare_utils import token
 
 class Config:
     def __init__(self):
-        self.TUSHARE_TOKEN = "410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5"
+        self.TUSHARE_TOKEN = token
         self.BASE_INTERVAL = 1  # 基础数据收集间隔(秒)
         self.CONFIG_LIST = None
         self.DATA_RETENTION_HOURS = 10  # 保留多少小时的数据

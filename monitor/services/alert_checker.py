@@ -195,10 +195,10 @@ class AlertChecker:
         else:
             return result_arr
         # 获取最后4根K线数据,再取三根，这三根必定是完整数据
-        last_three = results_min.iloc[-4:]
-        last_k = last_three.iloc[-2]  # 最后一根K线
-        prev_k = last_three.iloc[-3]  # 倒数第二根K线
-        prev_prev_k = last_three.iloc[-4]  # 倒数第三根K线
+        last_four = results_min.iloc[-4:]
+        last_k = last_four.iloc[-2]  # 最后一根K线
+        prev_k = last_four.iloc[-3]  # 倒数第二根K线
+        prev_prev_k = last_four.iloc[-4]  # 倒数第三根K线
 
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-1], 6).__round__(1)
         pre_rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
@@ -219,21 +219,20 @@ class AlertChecker:
 
 
         # 修改RSI判断逻辑：检查是否连续触发
-        if not 20 <= rsi_6 <= 80:
+        if not 20 <= rsi_6 <= 70:
             # 检查是否连续触发：当前和前一期RSI都不在正常范围内
             is_consecutive_trigger = (pre_rsi_6 is not None and
-                                      not 20 <= pre_rsi_6 <= 80)
+                                      not 20 <= pre_rsi_6 <= 70)
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
-                rsi_6 = max(20, min(rsi_6, 80))
+                rsi_6 = max(20, min(rsi_6, 70))
                 result_arr.append(f"({window}min)rsi_6:{rsi_6}")
                 current_state['last_rsi_triggered'] = True
             else:
                 current_state['last_rsi_triggered'] = True  # 更新状态但不触发
         else:
             current_state['last_rsi_triggered'] = False  # RSI回到正常范围，重置状态
-        if not 20 <= pre_rsi_6 <= 80:
-            # 检查吞没形态（阳包阴或阴包阳）
+        if not 20 <= pre_rsi_6 <= 70:
             # 放量阴-阳
             if (prev_k['close'] < prev_k['open'] and  # 前一根是阴线
                 last_k['close'] >= last_k['open']) and last_k['amount'] > prev_k['amount']:
@@ -282,5 +281,8 @@ class AlertChecker:
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
                 result_arr.append(f"({window}min)down_up_down")
-
+        #打印当时的数据信息
+        if len(result_arr)>0:
+            print(result_arr)
+            print(last_four)
         return result_arr

@@ -4,10 +4,10 @@ import tushare as ts
 import pandas as pd
 import json
 from utils.date_utils import Date_utils
+token = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 
 # 初始化
-TOKEN = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'  # ← 替换这里
-pro = ts.pro_api(TOKEN)
+pro = ts.pro_api(token)
 current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 config_dir = os.path.join(current_dir, 'monitor/config_files')  # 假设 JSON 文件在 config_files 文件夹中
 config = {}
