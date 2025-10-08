@@ -1,12 +1,12 @@
 from datetime import datetime
 
 class StockData:
-    def __init__(self, config):
+    def __init__(self, config,data_fetcher):
         self.data_storage = {}
         self.last_update_time = {}
         self.config = config
         self.initialize_data_storage()
-
+        self.data_fetcher = data_fetcher
     def initialize_data_storage(self):
         base_retention = self.config.DATA_RETENTION_HOURS * 3600 // self.config.BASE_INTERVAL
 
@@ -14,7 +14,7 @@ class StockData:
             self.data_storage[stock] = {}
             self.last_update_time[stock] = datetime.now()
 
-            self.data_storage[stock]["base"] = {
+            self.data_storage[stock]= {
                 "candles": [],
                 "maxlen": base_retention,
                 "interval": self.config.BASE_INTERVAL
@@ -45,7 +45,7 @@ class StockData:
                 'pre_close': getattr(row, 'pre_close', 0)
             }
 
-            base_data = self.data_storage[stock]["base"]
+            base_data = self.data_storage[stock]
             base_data["candles"] = self._add_to_array(
                 base_data["candles"], candle_data, base_data["maxlen"]
             )
@@ -53,4 +53,11 @@ class StockData:
             self.last_update_time[stock] = current_time
 
     def get_stock_data(self, stock):
-        return self.data_storage.get(stock, {}).get("base", {}).get("candles", [])
+        value = self.data_storage.get(stock, {}).get("candles", [])
+        if len(value) == 0:
+            # 获取数据
+            data_list = self.data_fetcher.fetch_realtime_data(stock)
+            # 并行处理数据更新和警报检查
+            self.update_data(data_list)
+
+        return self.data_storage.get(stock, {}).get("candles", [])

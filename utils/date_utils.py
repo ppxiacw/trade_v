@@ -74,7 +74,7 @@ class Date_utils:
         index = calendar[calendar['trade_date'] == today_str].index[0] if not calendar[
             calendar['trade_date'] == today_str].empty else None
 
-        if index is not None and calendar.loc[index]['trade_status'] == '0':
+        if index is not None and str(calendar.loc[index]['trade_status']) == '0':
             for i in reversed(range(0, index)):
                 if calendar.loc[i]['trade_status'] == '1':
                     today_str = calendar.loc[i]['trade_date']

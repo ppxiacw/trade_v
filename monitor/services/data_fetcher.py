@@ -18,10 +18,22 @@ class DataFetcher:
             self.pro = ts.pro_api()
 
     def fetch_realtime_data(self, stock_codes):
+        """
+        获取股票实时行情数据
+        支持单个股票代码（字符串）或多个股票代码（列表）
+        """
         if self.debug_mode:
             return self.get_manual_data()
         else:
-            return IndexAnalysis.realtime_quote(ts_code=",".join(stock_codes))
+            # 如果输入是单个股票代码（字符串），直接使用
+            if isinstance(stock_codes, str):
+                return IndexAnalysis.realtime_quote(ts_code=stock_codes)
+            # 如果输入是股票代码列表，使用join连接
+            elif isinstance(stock_codes, list):
+                return IndexAnalysis.realtime_quote(ts_code=",".join(stock_codes))
+            # 其他类型输入处理
+            else:
+                raise ValueError("stock_codes 必须是字符串或列表类型")
 
     def get_manual_data(self, json_file="manual.json"):
         try:

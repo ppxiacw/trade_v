@@ -25,8 +25,9 @@ CORS(app)
 
 # 初始化配置和组件
 config = Config()
-stock_data = StockData(config)
 data_fetcher = DataFetcher(config, config.DEBUG_MODE)
+stock_data = StockData(config,data_fetcher)
+
 alert_checker = AlertChecker(config, stock_data)
 alert_sender = AlertSender(config)
 
@@ -45,7 +46,18 @@ def volume_ratio(stock_codes=None):
         stock_codes = list(config.CONFIG_LIST.keys())
     else:
         stock_codes = stock_codes.split(',')
-    return get_volume_ratio_simple(stock_codes)
+    get_volume_ratio_simple(stock_codes)
+    return 'success'
+
+@app.route('/api/ma', methods=['GET'])
+@app.route('/api/ma/<string:stock_codes>', methods=['GET'])
+def calculate_ma_distances(stock_codes=None):
+    if stock_codes is None:
+        stock_codes = list(config.CONFIG_LIST.keys())
+    else:
+        stock_codes = stock_codes.split(',')
+    v = alert_checker.calculate_ma_distances(stock_codes)
+    return v
 
 
 @app.route('/api/reload_config')

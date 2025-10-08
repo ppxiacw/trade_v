@@ -286,3 +286,56 @@ class AlertChecker:
             print(result_arr)
             print(last_four)
         return result_arr
+
+    def calculate_ma_distances(self, stock_list):
+        """
+        计算多只股票当前价格距离各个均线的点数和百分比
+        参数: stock_list - 股票代码列表
+        返回: 字典格式 {股票代码: {均线周期: {"diff": 点数差, "percent": 百分比差}}}
+        """
+        all_distances = {}
+
+        for stock in stock_list:
+            ma_distances = {}
+
+            # 获取股票数据
+            candles = self.stock_data.get_stock_data(stock)
+            if not candles:
+                continue
+
+            # 获取实时数据和均线值
+            data = IndexAnalysis.my_pro_bar(stock)
+            ma = IndexAnalysis.calculate_realtime_ma(data, candles[-1])
+
+            # 使用当日最低价作为当前价格
+            current_price = candles[-1]['close']
+
+            # 获取均线配置
+            ma_types = self.config.MONITOR_STOCKS[stock].get("ma_types", [5, 10, 20, 30, 60, 120])
+
+            for ma_type in ma_types:
+                ma_key = f"ma{ma_type}"
+
+                # 确保均线数据存在且有效
+                if ma_key not in ma or ma[ma_key] <= 0:
+                    continue
+
+                ma_value = ma[ma_key]
+
+                # 计算点数差和百分比差
+                price_diff = current_price - ma_value
+                percent_diff = (price_diff / ma_value) * 100
+
+                # 添加到当前股票的结果字典
+                ma_distances[ma_type] = {
+                    "diff": price_diff,
+                    "percent": percent_diff
+                }
+
+
+
+            # 将当前股票的结果添加到总结果
+            if ma_distances:  # 只添加有结果的股票
+                all_distances[stock] = ma_distances
+
+        return all_distances
