@@ -34,6 +34,53 @@
             font-size: 14px;
         }
 
+        .decision-panel {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .decision-group {
+            margin-bottom: 15px;
+        }
+
+        .decision-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .decision-options {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .decision-option {
+            flex: 1;
+            text-align: center;
+        }
+
+        .decision-option input[type="radio"] {
+            display: none;
+        }
+
+        .decision-option label {
+            display: block;
+            padding: 10px;
+            background-color: #ecf0f1;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: normal;
+        }
+
+        .decision-option input[type="radio"]:checked + label {
+            background-color: #3498db;
+            color: white;
+        }
+
         .control-panel {
             background-color: #f8f9fa;
             border-radius: 8px;
@@ -252,12 +299,47 @@
         .explanation li {
             margin-bottom: 8px;
         }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
 <div class="container">
     <h1>股票仓位控制系统</h1>
     <div class="subtitle">基于多条件加权评估的仓位管理</div>
+
+    <!-- 决策面板 -->
+    <div class="decision-panel">
+        <div class="decision-group">
+            <label>是否为抄底？</label>
+            <div class="decision-options">
+                <div class="decision-option">
+                    <input type="radio" id="bottomFishingYes" name="bottomFishing" value="yes">
+                    <label for="bottomFishingYes">是抄底</label>
+                </div>
+                <div class="decision-option">
+                    <input type="radio" id="bottomFishingNo" name="bottomFishing" value="no">
+                    <label for="bottomFishingNo">不是抄底</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="decision-group hidden" id="marketStabilityGroup">
+            <label>大盘是否企稳？</label>
+            <div class="decision-options">
+                <div class="decision-option">
+                    <input type="radio" id="marketStableYes" name="marketStability" value="yes">
+                    <label for="marketStableYes">是，大盘已企稳</label>
+                </div>
+                <div class="decision-option">
+                    <input type="radio" id="marketStableNo" name="marketStability" value="no">
+                    <label for="marketStableNo">否，大盘未企稳</label>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div class="control-panel">
         <div class="control-group">
@@ -275,7 +357,7 @@
         </div>
     </div>
 
-    <div class="checkbox-group">
+    <div class="checkbox-group hidden" id="conditionSelector">
         <div class="checkbox-item">
             <label>
                 <input type="checkbox" id="cond1" value="cond1">
@@ -391,6 +473,7 @@
             <li><strong>买入金额</strong>：买入金额 = 总金额 × 推荐仓位</li>
             <li><strong>使用建议</strong>：得分率低于50%不建议建仓，70%以上可考虑较重仓位</li>
             <li><strong>多只股票</strong>：对每只股票单独评估，总仓位不超过100%</li>
+            <li><strong>抄底判断</strong>：如果是抄底操作，必须确认大盘已企稳才能继续评估</li>
         </ul>
     </div>
 </div>
@@ -422,6 +505,14 @@
     const totalAmountInput = document.getElementById('totalAmount');
     const selectAllButton = document.getElementById('selectAll');
     const resetButton = document.getElementById('reset');
+    const conditionSelector = document.getElementById('conditionSelector');
+    const marketStabilityGroup = document.getElementById('marketStabilityGroup');
+
+    // 抄底选择相关元素
+    const bottomFishingYes = document.getElementById('bottomFishingYes');
+    const bottomFishingNo = document.getElementById('bottomFishingNo');
+    const marketStableYes = document.getElementById('marketStableYes');
+    const marketStableNo = document.getElementById('marketStableNo');
 
     // 格式化金额显示
     function formatCurrency(amount) {
@@ -433,8 +524,50 @@
         }).format(amount);
     }
 
+    // 更新条件选择器的显示状态
+    function updateConditionSelectorVisibility() {
+        // 如果选择了"是抄底"
+        if (bottomFishingYes.checked) {
+            // 显示大盘企稳问题
+            marketStabilityGroup.classList.remove('hidden');
+
+            // 如果选择了"大盘已企稳"，显示条件选择器
+            if (marketStableYes.checked) {
+                conditionSelector.classList.remove('hidden');
+            } else {
+                conditionSelector.classList.add('hidden');
+            }
+        }
+        // 如果选择了"不是抄底"
+        else if (bottomFishingNo.checked) {
+            // 隐藏大盘企稳问题，直接显示条件选择器
+            marketStabilityGroup.classList.add('hidden');
+            conditionSelector.classList.remove('hidden');
+        }
+        // 如果未选择抄底状态
+        else {
+            // 隐藏所有后续内容
+            marketStabilityGroup.classList.add('hidden');
+            conditionSelector.classList.add('hidden');
+        }
+
+        // 更新显示
+        updateDisplay();
+    }
+
     // 更新显示函数
     function updateDisplay() {
+        // 如果条件选择器不可见，则清空结果
+        if (conditionSelector.classList.contains('hidden')) {
+            countElement.textContent = 0;
+            scoreElement.textContent = 0;
+            scoreRateElement.textContent = '0%';
+            positionElement.textContent = '0%';
+            buyAmountElement.textContent = formatCurrency(0);
+            positionBarElement.style.width = '0%';
+            return;
+        }
+
         const checkedCount = Array.from(checkboxes).filter(checkbox => checkbox.checked).length;
         countElement.textContent = checkedCount;
 
@@ -472,6 +605,14 @@
             }
         });
     }
+
+    // 为抄底选择添加事件监听器
+    bottomFishingYes.addEventListener('change', updateConditionSelectorVisibility);
+    bottomFishingNo.addEventListener('change', updateConditionSelectorVisibility);
+
+    // 为大盘企稳选择添加事件监听器
+    marketStableYes.addEventListener('change', updateConditionSelectorVisibility);
+    marketStableNo.addEventListener('change', updateConditionSelectorVisibility);
 
     // 为每个复选框添加事件监听器
     checkboxes.forEach(checkbox => {

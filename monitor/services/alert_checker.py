@@ -311,7 +311,9 @@ class AlertChecker:
             current_price = candles[-1]['close']
 
             # 获取均线配置
-            ma_types = self.config.MONITOR_STOCKS[stock].get("ma_types", [5, 10, 20, 30, 60, 120])
+            # 如果需要确保stock键存在
+            stock_config = self.config.MONITOR_STOCKS.setdefault(stock, {})
+            ma_types = stock_config.get("ma_types", [5, 10, 20, 30, 60, 120])
 
             for ma_type in ma_types:
                 ma_key = f"ma{ma_type}"
@@ -328,8 +330,10 @@ class AlertChecker:
 
                 # 添加到当前股票的结果字典
                 ma_distances[ma_type] = {
-                    "diff": price_diff,
-                    "percent": percent_diff
+                    "diff": price_diff.round(2),
+                    "percent": percent_diff.round(2),
+                    "current_price":current_price.round(2),
+                    "ma_value": ma_value.round(2)
                 }
 
 

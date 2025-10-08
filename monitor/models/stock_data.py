@@ -16,14 +16,11 @@ class StockData:
 
             self.data_storage[stock]= {
                 "candles": [],
-                "maxlen": base_retention,
                 "interval": self.config.BASE_INTERVAL
             }
 
-    def _add_to_array(self, array, item, maxlen):
+    def _add_to_array(self, array, item):
         array.append(item)
-        if len(array) > maxlen:
-            return array[1:]
         return array
 
     def update_data(self, data_list):
@@ -45,13 +42,9 @@ class StockData:
                 'pre_close': getattr(row, 'pre_close', 0)
             }
 
-            base_data = self.data_storage[stock]
-            base_data["candles"] = self._add_to_array(
-                base_data["candles"], candle_data, base_data["maxlen"]
-            )
-
+            base_data = self.data_storage.setdefault(stock, {})
+            base_data.setdefault("candles", []).append(candle_data)
             self.last_update_time[stock] = current_time
-
     def get_stock_data(self, stock):
         value = self.data_storage.get(stock, {}).get("candles", [])
         if len(value) == 0:
