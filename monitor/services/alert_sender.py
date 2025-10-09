@@ -43,10 +43,7 @@ class AlertSender:
             alert_info = f"{get_stock_name(stock)} {alert_msg} 警报 {current_time.strftime('%H:%M:%S')}"
             self.alerts_history.append(alert_info)
 
-            if self.config.DEBUG_MODE:
-                print(f"[DEBUG] [发送] {alert_info}")
-            else:
-                send_dingtalk_message(alert_info, stock)
+            send_dingtalk_message(alert_info, stock)
 
 
     def get_alert_history(self):

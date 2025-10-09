@@ -3,23 +3,22 @@ import json
 import random
 import re
 
-
-
-
 ma_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
 bottom_line_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=bce85be747a6d8d29caa7b910b54bb442fb86fe77b7839375c4e41e71fe6fdae'
-shrink_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
-def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'):
+common = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
+
+
+def send_dingtalk_message(title, tsCode, webhook_url=common):
     headers = {'Content-Type': 'application/json'}
     image_url1 = generate_stock_image_url(tsCode)
-    image_url2 = generate_stock_image_url(tsCode,'mink5')
-
-
+    image_url2 = generate_stock_image_url(tsCode, 'mink5')
+    if 'ma' in title:
+        webhook_url = ma_webhook_url
     data = {
         "msgtype": "actionCard",
         "actionCard": {
-            "title": f"{ title}\n\n !",
-            "text": f"{ title}\n\n ![走势缩略图1]({image_url1}) \n\n ![走势缩略图2]({image_url2})",
+            "title": f"{title}\n\n !",
+            "text": f"{title}\n\n ![走势缩略图1]({image_url1}) \n\n ![走势缩略图2]({image_url2})",
             "btns": [
                 {
                     "title": "分时图",
@@ -33,22 +32,11 @@ def send_dingtalk_message(title, tsCode,webhook_url='https://oapi.dingtalk.com/r
             "btnOrientation": "1"  # 设置按钮垂直排列，如果按钮多的话
         }
     }
-    print(title+"\n")
-    return
-    try:
-        response = requests.post(webhook_url, headers=headers, json=data,verify=False)
-    except Exception as e:
-        print(f"发送消息失败: {e}")
-        return
-
-    if response.status_code == 200:
-        pass
-    else:
-        print(f"失败状态码：{response.status_code}")
+    print(title + "\n")
+    requests.post(webhook_url, headers=headers, json=data, verify=False)
 
 
-
-def generate_stock_image_url(stock_code: str,k_type='min') -> str:
+def generate_stock_image_url(stock_code: str, k_type='min') -> str:
     """
     生成新浪股票日线图 URL（支持 000001.SH 格式）
 
@@ -68,8 +56,5 @@ def generate_stock_image_url(stock_code: str,k_type='min') -> str:
 
     # 生成 URL
     return f"http://image.sinajs.cn/newchart/{k_type}/n/{sina_code}.gif?t={random.randint(0, 99999)}"
-
-
-
 
 # send_dingtalk_message('00001','000001.SH')

@@ -43,7 +43,7 @@ def get_cached_historical_volume(stock_code, date_str, time_str):
     """
     获取缓存的历史成交量数据
     """
-    if str(datetime.now().date()) == Date_utils.get_today():
+    if not str(datetime.now().date()) == Date_utils.get_today():
         time_str = "15:01:00"
     cache_key = f"{stock_code}_{date_str}_{time_str}"
     cached_data = volume_cache.get(cache_key)

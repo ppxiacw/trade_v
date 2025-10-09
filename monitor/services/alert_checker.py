@@ -281,10 +281,7 @@ class AlertChecker:
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
                 result_arr.append(f"({window}min)down_up_down")
-        #打印当时的数据信息
-        if len(result_arr)>0:
-            print(result_arr)
-            print(last_four)
+        #todo 记录信息到数据库
         return result_arr
 
     def calculate_ma_distances(self, stock_list):
