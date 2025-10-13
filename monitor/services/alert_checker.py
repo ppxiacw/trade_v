@@ -327,10 +327,10 @@ class AlertChecker:
 
                 # 添加到当前股票的结果字典
                 ma_distances[ma_type] = {
-                    "diff": price_diff.round(2),
-                    "percent": percent_diff.round(2),
-                    "current_price":current_price.round(2),
-                    "ma_value": ma_value.round(2)
+                    "diff": price_diff.__round__(2),
+                    "percent": percent_diff.__round__(2),
+                    "current_price":current_price.__round__(2),
+                    "ma_value": ma_value.__round__(2)
                 }
 
 

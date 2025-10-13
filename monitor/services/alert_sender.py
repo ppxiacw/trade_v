@@ -1,7 +1,7 @@
 from datetime import datetime
 from utils.send_dingding import send_dingtalk_message
 from utils.GetStockData import get_stock_name
-
+from  monitor.config.db_monitor import stock_alert_dao
 
 class AlertSender:
     def __init__(self, config):
@@ -44,7 +44,17 @@ class AlertSender:
             self.alerts_history.append(alert_info)
 
             send_dingtalk_message(alert_info, stock)
+            # Insert into database
+            alert_data = {
+                'stock_code': stock,
+                'stock_name': get_stock_name(stock),
+                'alert_type': '价格突破',
+                'alert_level': 2,
+                'alert_message': alert_info,
+                'trigger_time': current_time
+            }
 
+            stock_alert_dao.insert_alert(alert_data)
 
     def get_alert_history(self):
         return self.alerts_history

@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>系统</title>
+    <title>股票仓位控制系统</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -206,10 +207,6 @@
             color: #2c3e50;
         }
 
-        #scoreRate, #position {
-            color: #e74c3c;
-        }
-
         .buy-amount-display {
             margin-top: 20px;
             padding: 15px;
@@ -263,19 +260,19 @@
             transition: background-color 0.3s;
         }
 
-        button#selectAll {
+        button.select-all {
             background-color: #2ecc71;
         }
 
-        button#selectAll:hover {
+        button.select-all:hover {
             background-color: #27ae60;
         }
 
-        button#reset {
+        button.reset {
             background-color: #e74c3c;
         }
 
-        button#reset:hover {
+        button.reset:hover {
             background-color: #c0392b;
         }
 
@@ -299,350 +296,309 @@
         .explanation li {
             margin-bottom: 8px;
         }
-
-        .hidden {
-            display: none;
-        }
     </style>
 </head>
 <body>
-<div class="container">
-    <h1>股票仓位控制系统</h1>
-    <div class="subtitle">基于多条件加权评估的仓位管理</div>
+    <div id="app">
+        <div class="container">
+            <h1>股票仓位控制系统</h1>
+            <div class="subtitle">基于多条件加权评估的仓位管理</div>
 
-    <!-- 决策面板 -->
-    <div class="decision-panel">
-        <div class="decision-group">
-            <label>是否为抄底？</label>
-            <div class="decision-options">
-                <div class="decision-option">
-                    <input type="radio" id="bottomFishingYes" name="bottomFishing" value="yes">
-                    <label for="bottomFishingYes">是抄底</label>
+            <!-- 决策面板 -->
+            <div class="decision-panel">
+                <div class="decision-group">
+                    <label>是否为抄底？</label>
+                    <div class="decision-options">
+                        <div class="decision-option">
+                            <input type="radio" id="bottomFishingYes" v-model="bottomFishing" value="yes">
+                            <label for="bottomFishingYes">是抄底</label>
+                        </div>
+                        <div class="decision-option">
+                            <input type="radio" id="bottomFishingNo" v-model="bottomFishing" value="no">
+                            <label for="bottomFishingNo">不是抄底</label>
+                        </div>
+                    </div>
                 </div>
-                <div class="decision-option">
-                    <input type="radio" id="bottomFishingNo" name="bottomFishing" value="no">
-                    <label for="bottomFishingNo">不是抄底</label>
+
+                <div class="decision-group" v-show="bottomFishing === 'yes'">
+                    <label>大盘是否企稳？</label>
+                    <div class="decision-options">
+                        <div class="decision-option">
+                            <input type="radio" id="marketStableYes" v-model="marketStability" value="yes">
+                            <label for="marketStableYes">是，大盘已企稳</label>
+                        </div>
+                        <div class="decision-option">
+                            <input type="radio" id="marketStableNo" v-model="marketStability" value="no">
+                            <label for="marketStableNo">否，大盘未企稳</label>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="decision-group hidden" id="marketStabilityGroup">
-            <label>大盘是否企稳？</label>
-            <div class="decision-options">
-                <div class="decision-option">
-                    <input type="radio" id="marketStableYes" name="marketStability" value="yes">
-                    <label for="marketStableYes">是，大盘已企稳</label>
+            <div class="control-panel">
+                <div class="control-group">
+                    <div class="max-position-input">
+                        <label for="maxPosition">最大单只股票仓位:</label>
+                        <input type="number" id="maxPosition" v-model.number="maxPosition" min="5" max="50"> %
+                    </div>
+                    <div class="info-text">建议值: 10-20%，根据风险承受能力调整</div>
                 </div>
-                <div class="decision-option">
-                    <input type="radio" id="marketStableNo" name="marketStability" value="no">
-                    <label for="marketStableNo">否，大盘未企稳</label>
+
+                <div class="control-group">
+                    <label for="totalAmount">总金额 (元):</label>
+                    <input type="number" id="totalAmount" v-model.number="totalAmount" min="0" step="1000">
+                    <div class="info-text">输入可用于投资的总金额，系统将根据推荐仓位计算买入金额</div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <div class="control-panel">
-        <div class="control-group">
-            <div class="max-position-input">
-                <label for="maxPosition">最大单只股票仓位:</label>
-                <input type="number" id="maxPosition" min="5" max="50" value="20"> %
+            <div class="checkbox-group" v-show="showConditionSelector">
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond1 }">
+                    <label>
+                        <input type="checkbox" id="cond1" v-model="conditions.cond1">
+                        五分钟满足量价关系
+                        <span class="weight">5分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond2 }">
+                    <label>
+                        <input type="checkbox" id="cond2" v-model="conditions.cond2">
+                        五分钟RSI低于80或者20
+                        <span class="weight">5分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond3 }">
+                    <label>
+                        <input type="checkbox" id="cond3" v-model="conditions.cond3">
+                        周线良好
+                        <span class="weight">15分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond4 }">
+                    <label>
+                        <input type="checkbox" id="cond4" v-model="conditions.cond4">
+                        日线良好
+                        <span class="weight">15分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond5 }">
+                    <label>
+                        <input type="checkbox" id="cond5" v-model="conditions.cond5">
+                        大盘预期良好
+                        <span class="weight">10分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond6 }">
+                    <label>
+                        <input type="checkbox" id="cond6" v-model="conditions.cond6">
+                        板块走势良好
+                        <span class="weight">10分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond7 }">
+                    <label>
+                        <input type="checkbox" id="cond7" v-model="conditions.cond7">
+                        盈亏比大于4
+                        <span class="weight">15分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond8 }">
+                    <label>
+                        <input type="checkbox" id="cond8" v-model="conditions.cond8">
+                        回调充分，1/3 3/4
+                        <span class="weight">10分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond9 }">
+                    <label>
+                        <input type="checkbox" id="cond9" v-model="conditions.cond9">
+                        在均线
+                        <span class="weight">10分</span>
+                    </label>
+                </div>
+                <div class="checkbox-item" :class="{ 'checked': conditions.cond10 }">
+                    <label>
+                        <input type="checkbox" id="cond10" v-model="conditions.cond10">
+                        外围情绪良好
+                        <span class="weight">5分</span>
+                    </label>
+                </div>
             </div>
-            <div class="info-text">建议值: 10-20%，根据风险承受能力调整</div>
-        </div>
 
-        <div class="control-group">
-            <label for="totalAmount">总金额 (元):</label>
-            <input type="number" id="totalAmount" min="0" value="100000" step="1000">
-            <div class="info-text">输入可用于投资的总金额，系统将根据推荐仓位计算买入金额</div>
-        </div>
-    </div>
+            <div class="results">
+                <div class="score-display">
+                    <div class="score-item">
+                        <h3>选中条件</h3>
+                        <div class="score-value">{{ checkedCount }}</div>
+                    </div>
+                    <div class="score-item">
+                        <h3>加权得分</h3>
+                        <div class="score-value">{{ totalScore }}</div>
+                    </div>
+                    <div class="score-item">
+                        <h3>得分率</h3>
+                        <div class="score-value">{{ scoreRate }}%</div>
+                    </div>
+                    <div class="score-item">
+                        <h3>推荐仓位</h3>
+                        <div class="score-value">{{ recommendedPosition }}%</div>
+                    </div>
+                </div>
 
-    <div class="checkbox-group hidden" id="conditionSelector">
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond1" value="cond1">
-                五分钟满足量价关系
-                <span class="weight">5分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond2" value="cond2">
-                五分钟RSI低于80或者20
-                <span class="weight">5分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond3" value="cond3">
-                周线良好
-                <span class="weight">15分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond4" value="cond4">
-                日线良好
-                <span class="weight">15分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond5" value="cond5">
-                大盘预期良好
-                <span class="weight">10分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond6" value="cond6">
-                板块走势良好
-                <span class="weight">10分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond7" value="cond7">
-                盈亏比大于4
-                <span class="weight">15分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond8" value="cond8">
-                回调充分，1/3 3/4
-                <span class="weight">10分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond9" value="cond9">
-                在均线
-                <span class="weight">10分</span>
-            </label>
-        </div>
-        <div class="checkbox-item">
-            <label>
-                <input type="checkbox" id="cond10" value="cond10">
-                外围情绪良好
-                <span class="weight">5分</span>
-            </label>
-        </div>
-    </div>
+                <div class="buy-amount-display">
+                    <h3>建议买入金额</h3>
+                    <div class="buy-amount-value">{{ formattedBuyAmount }}</div>
+                </div>
 
-    <div class="results">
-        <div class="score-display">
-            <div class="score-item">
-                <h3>选中条件</h3>
-                <div class="score-value" id="count">0</div>
+                <div class="position-bar">
+                    <div class="position-fill" :style="{ width: positionBarWidth + '%' }"></div>
+                </div>
             </div>
-            <div class="score-item">
-                <h3>加权得分</h3>
-                <div class="score-value" id="score">0</div>
+
+            <div class="actions">
+                <button class="select-all" @click="selectAll">全选</button>
+                <button class="reset" @click="reset">重置</button>
             </div>
-            <div class="score-item">
-                <h3>得分率</h3>
-                <div class="score-value" id="scoreRate">0%</div>
-            </div>
-            <div class="score-item">
-                <h3>推荐仓位</h3>
-                <div class="score-value" id="position">0%</div>
+
+            <div class="explanation">
+                <h3>系统说明</h3>
+                <ul>
+                    <li><strong>权重分配</strong>：根据技术分析原则，长期趋势和风险回报比权重更高（周线、日线、盈亏比各15分），短期指标权重较低</li>
+                    <li><strong>仓位计算</strong>：推荐仓位 = 得分率 × 最大单只股票仓位</li>
+                    <li><strong>买入金额</strong>：买入金额 = 总金额 × 推荐仓位</li>
+                    <li><strong>使用建议</strong>：得分率低于50%不建议建仓，70%以上可考虑较重仓位</li>
+                    <li><strong>多只股票</strong>：对每只股票单独评估，总仓位不超过100%</li>
+                    <li><strong>抄底判断</strong>：如果是抄底操作，必须确认大盘已企稳才能继续评估</li>
+                </ul>
             </div>
         </div>
-
-        <div class="buy-amount-display">
-            <h3>建议买入金额</h3>
-            <div class="buy-amount-value" id="buyAmount">0 元</div>
-        </div>
-
-        <div class="position-bar">
-            <div class="position-fill" id="positionBar"></div>
-        </div>
     </div>
 
-    <div class="actions">
-        <button id="selectAll">全选</button>
-        <button id="reset">重置</button>
-    </div>
+    <script>
+        const { createApp, ref, computed, watch } = Vue;
 
-    <div class="explanation">
-        <h3>系统说明</h3>
-        <ul>
-            <li><strong>权重分配</strong>：根据技术分析原则，长期趋势和风险回报比权重更高（周线、日线、盈亏比各15分），短期指标权重较低</li>
-            <li><strong>仓位计算</strong>：推荐仓位 = 得分率 × 最大单只股票仓位</li>
-            <li><strong>买入金额</strong>：买入金额 = 总金额 × 推荐仓位</li>
-            <li><strong>使用建议</strong>：得分率低于50%不建议建仓，70%以上可考虑较重仓位</li>
-            <li><strong>多只股票</strong>：对每只股票单独评估，总仓位不超过100%</li>
-            <li><strong>抄底判断</strong>：如果是抄底操作，必须确认大盘已企稳才能继续评估</li>
-        </ul>
-    </div>
-</div>
+        createApp({
+            setup() {
+                // 权重配置
+                const weights = {
+                    cond1: 5,   // 五分钟满足量价关系
+                    cond2: 5,   // 五分钟RSI低于80或者20
+                    cond3: 15,  // 周线良好
+                    cond4: 15,  // 日线良好
+                    cond5: 10,  // 大盘预期良好
+                    cond6: 10,  // 板块走势良好
+                    cond7: 15,  // 盈亏比大于4
+                    cond8: 10,  // 回调充分，1/3 3/4
+                    cond9: 10,  // 在均线
+                    cond10: 5   // 外围情绪良好
+                };
 
-<script>
-    // 权重配置
-    const weights = {
-        cond1: 5,   // 五分钟满足量价关系
-        cond2: 5,   // 五分钟RSI低于80或者20
-        cond3: 15,  // 周线良好
-        cond4: 15,  // 日线良好
-        cond5: 10,  // 大盘预期良好
-        cond6: 10,  // 板块走势良好
-        cond7: 15,  // 盈亏比大于4
-        cond8: 10,  // 回调充分，1/3 3/4
-        cond9: 10,  // 在均线
-        cond10: 5   // 外围情绪良好
-    };
+                // 响应式数据
+                const bottomFishing = ref(null);
+                const marketStability = ref(null);
+                const maxPosition = ref(20);
+                const totalAmount = ref(300000);
 
-    // 获取DOM元素
-    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-    const countElement = document.getElementById('count');
-    const scoreElement = document.getElementById('score');
-    const scoreRateElement = document.getElementById('scoreRate');
-    const positionElement = document.getElementById('position');
-    const buyAmountElement = document.getElementById('buyAmount');
-    const positionBarElement = document.getElementById('positionBar');
-    const maxPositionInput = document.getElementById('maxPosition');
-    const totalAmountInput = document.getElementById('totalAmount');
-    const selectAllButton = document.getElementById('selectAll');
-    const resetButton = document.getElementById('reset');
-    const conditionSelector = document.getElementById('conditionSelector');
-    const marketStabilityGroup = document.getElementById('marketStabilityGroup');
+                const conditions = ref({
+                    cond1: false,
+                    cond2: false,
+                    cond3: false,
+                    cond4: false,
+                    cond5: false,
+                    cond6: false,
+                    cond7: false,
+                    cond8: false,
+                    cond9: false,
+                    cond10: false
+                });
 
-    // 抄底选择相关元素
-    const bottomFishingYes = document.getElementById('bottomFishingYes');
-    const bottomFishingNo = document.getElementById('bottomFishingNo');
-    const marketStableYes = document.getElementById('marketStableYes');
-    const marketStableNo = document.getElementById('marketStableNo');
+                // 计算属性
+                const showConditionSelector = computed(() => {
+                    if (bottomFishing.value === 'yes') {
+                        return marketStability.value === 'yes';
+                    } else if (bottomFishing.value === 'no') {
+                        return true;
+                    }
+                    return false;
+                });
 
-    // 格式化金额显示
-    function formatCurrency(amount) {
-        return new Intl.NumberFormat('zh-CN', {
-            style: 'currency',
-            currency: 'CNY',
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0
-        }).format(amount);
-    }
+                const checkedCount = computed(() => {
+                    return Object.values(conditions.value).filter(Boolean).length;
+                });
 
-    // 更新条件选择器的显示状态
-    function updateConditionSelectorVisibility() {
-        // 如果选择了"是抄底"
-        if (bottomFishingYes.checked) {
-            // 显示大盘企稳问题
-            marketStabilityGroup.classList.remove('hidden');
+                const totalScore = computed(() => {
+                    let score = 0;
+                    for (const [key, value] of Object.entries(conditions.value)) {
+                        if (value) {
+                            score += weights[key];
+                        }
+                    }
+                    return score;
+                });
 
-            // 如果选择了"大盘已企稳"，显示条件选择器
-            if (marketStableYes.checked) {
-                conditionSelector.classList.remove('hidden');
-            } else {
-                conditionSelector.classList.add('hidden');
+                const scoreRate = computed(() => {
+                    return (totalScore.value / 100 * 100).toFixed(1);
+                });
+
+                const recommendedPosition = computed(() => {
+                    return (scoreRate.value / 100 * maxPosition.value).toFixed(1);
+                });
+
+                const buyAmount = computed(() => {
+                    return totalAmount.value * (recommendedPosition.value / 100);
+                });
+
+                const formattedBuyAmount = computed(() => {
+                    return new Intl.NumberFormat('zh-CN', {
+                        style: 'currency',
+                        currency: 'CNY',
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 0
+                    }).format(buyAmount.value);
+                });
+
+                const positionBarWidth = computed(() => {
+                    return (recommendedPosition.value / maxPosition.value * 100).toFixed(1);
+                });
+
+                // 方法
+                const selectAll = () => {
+                    for (const key in conditions.value) {
+                        conditions.value[key] = true;
+                    }
+                };
+
+                const reset = () => {
+                    for (const key in conditions.value) {
+                        conditions.value[key] = false;
+                    }
+                };
+
+                // 监听器
+                watch(bottomFishing, (newValue) => {
+                    if (newValue === 'no') {
+                        marketStability.value = null;
+                    }
+                });
+
+                return {
+                    bottomFishing,
+                    marketStability,
+                    maxPosition,
+                    totalAmount,
+                    conditions,
+                    showConditionSelector,
+                    checkedCount,
+                    totalScore,
+                    scoreRate,
+                    recommendedPosition,
+                    buyAmount,
+                    formattedBuyAmount,
+                    positionBarWidth,
+                    selectAll,
+                    reset
+                };
             }
-        }
-        // 如果选择了"不是抄底"
-        else if (bottomFishingNo.checked) {
-            // 隐藏大盘企稳问题，直接显示条件选择器
-            marketStabilityGroup.classList.add('hidden');
-            conditionSelector.classList.remove('hidden');
-        }
-        // 如果未选择抄底状态
-        else {
-            // 隐藏所有后续内容
-            marketStabilityGroup.classList.add('hidden');
-            conditionSelector.classList.add('hidden');
-        }
-
-        // 更新显示
-        updateDisplay();
-    }
-
-    // 更新显示函数
-    function updateDisplay() {
-        // 如果条件选择器不可见，则清空结果
-        if (conditionSelector.classList.contains('hidden')) {
-            countElement.textContent = 0;
-            scoreElement.textContent = 0;
-            scoreRateElement.textContent = '0%';
-            positionElement.textContent = '0%';
-            buyAmountElement.textContent = formatCurrency(0);
-            positionBarElement.style.width = '0%';
-            return;
-        }
-
-        const checkedCount = Array.from(checkboxes).filter(checkbox => checkbox.checked).length;
-        countElement.textContent = checkedCount;
-
-        // 计算加权得分
-        let totalScore = 0;
-        checkboxes.forEach(checkbox => {
-            if (checkbox.checked) {
-                totalScore += weights[checkbox.id];
-            }
-        });
-
-        scoreElement.textContent = totalScore;
-
-        // 计算得分率和推荐仓位
-        const scoreRate = totalScore / 100;
-        const maxPosition = parseInt(maxPositionInput.value) / 100;
-        const recommendedPosition = scoreRate * maxPosition * 100;
-
-        scoreRateElement.textContent = (scoreRate * 100).toFixed(1) + '%';
-        positionElement.textContent = recommendedPosition.toFixed(1) + '%';
-        positionBarElement.style.width = recommendedPosition / maxPosition + '%';
-
-        // 计算买入金额
-        const totalAmount = parseFloat(totalAmountInput.value) || 0;
-        const buyAmount = totalAmount * (recommendedPosition / 100);
-        buyAmountElement.textContent = formatCurrency(buyAmount);
-
-        // 更新复选框样式
-        checkboxes.forEach(checkbox => {
-            const item = checkbox.closest('.checkbox-item');
-            if (checkbox.checked) {
-                item.classList.add('checked');
-            } else {
-                item.classList.remove('checked');
-            }
-        });
-    }
-
-    // 为抄底选择添加事件监听器
-    bottomFishingYes.addEventListener('change', updateConditionSelectorVisibility);
-    bottomFishingNo.addEventListener('change', updateConditionSelectorVisibility);
-
-    // 为大盘企稳选择添加事件监听器
-    marketStableYes.addEventListener('change', updateConditionSelectorVisibility);
-    marketStableNo.addEventListener('change', updateConditionSelectorVisibility);
-
-    // 为每个复选框添加事件监听器
-    checkboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', updateDisplay);
-    });
-
-    // 最大仓位输入事件
-    maxPositionInput.addEventListener('input', updateDisplay);
-
-    // 总金额输入事件
-    totalAmountInput.addEventListener('input', updateDisplay);
-
-    // 全选按钮功能
-    selectAllButton.addEventListener('click', () => {
-        checkboxes.forEach(checkbox => {
-            checkbox.checked = true;
-        });
-        updateDisplay();
-    });
-
-    // 重置按钮功能
-    resetButton.addEventListener('click', () => {
-        checkboxes.forEach(checkbox => {
-            checkbox.checked = false;
-        });
-        updateDisplay();
-    });
-
-    // 初始化显示
-    updateDisplay();
-</script>
+        }).mount('#app');
+    </script>
 </body>
 </html>
