@@ -1,7 +1,8 @@
 from datetime import datetime
 from utils.send_dingding import send_dingtalk_message
 from utils.GetStockData import get_stock_name
-from  monitor.config.db_monitor import stock_alert_dao
+from monitor.config.db_monitor import stock_alert_dao
+
 
 class AlertSender:
     def __init__(self, config):
@@ -17,43 +18,47 @@ class AlertSender:
         valid_alerts = []
 
         for alert_item in alerts_with_cooldown:
-            # 判断 alert_item 是否为 (message, cooldown) 元组
+            # 判断 alert_item 是否为 (alert_data, cooldown) 元组（带冷却时间）
             if isinstance(alert_item, tuple) and len(alert_item) >= 2:
-                alert_msg, cooldown = alert_item
+                alert_data, cooldown = alert_item
             else:
-                # 仅消息，使用默认冷却时间
-                alert_msg = alert_item
+                # 只有alert_data，使用默认冷却时间
+                alert_data = alert_item
                 cooldown = self.config.ALERT_COOLDOWN
 
             # 如果 cooldown 无效 (为 None 或非正数)，使用默认冷却时间
             if not isinstance(cooldown, (int, float)) or cooldown <= 0:
                 cooldown = self.config.ALERT_COOLDOWN
 
-            last_trigger = self.last_alert_time[stock].get(alert_msg)
+            # 使用alert_message作为冷却时间的键
+            alert_message = alert_data['alert_message']
+            last_trigger = self.last_alert_time[stock].get(alert_message)
 
             # 判断是否已经过了冷却时间
             if not last_trigger or (current_time - last_trigger).seconds >= cooldown:
-                valid_alerts.append(alert_msg)
-                self.last_alert_time[stock][alert_msg] = current_time
+                valid_alerts.append(alert_data)
+                self.last_alert_time[stock][alert_message] = current_time
 
         if not valid_alerts:
             return
 
-        for alert_msg in valid_alerts:
-            alert_info = f"{get_stock_name(stock)} {alert_msg} 警报 {current_time.strftime('%H:%M:%S')}"
+        for alert_data in valid_alerts:
+            # 确保alert_data中有所有必需的字段
+            if 'trigger_time' not in alert_data:
+                alert_data['trigger_time'] = current_time
+            if 'stock_name' not in alert_data:
+                alert_data['stock_name'] = get_stock_name(stock)
+            if 'stock_code' not in alert_data:
+                alert_data['stock_code'] = stock
+
+            # 构建显示消息
+            alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {current_time.strftime('%H:%M:%S')}"
             self.alerts_history.append(alert_info)
 
+            # 发送钉钉消息
             send_dingtalk_message(alert_info, stock)
-            # Insert into database
-            alert_data = {
-                'stock_code': stock,
-                'stock_name': get_stock_name(stock),
-                'alert_type': '价格突破',
-                'alert_level': 2,
-                'alert_message': alert_info,
-                'trigger_time': current_time
-            }
 
+            # 插入数据库 - 直接使用alert_data
             stock_alert_dao.insert_alert(alert_data)
 
     def get_alert_history(self):

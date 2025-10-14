@@ -1,6 +1,7 @@
 from datetime import datetime
 from utils.tushare_utils import IndexAnalysis
 from utils.IndicatorCalculation import IndicatorCalculation
+from utils.GetStockData import get_stock_name
 
 
 class AlertChecker:
@@ -39,12 +40,12 @@ class AlertChecker:
     def _check_time_window_conditions(self, stock, window_sec):
         triggered_conditions = []
         candles = self.stock_data.get_stock_data(stock)
-        price_alerts = self._check_price_movement(candles, window_sec, self.config.MONITOR_STOCKS[stock])
+        price_alerts = self._check_price_movement(stock,candles, window_sec, self.config.MONITOR_STOCKS[stock])
         triggered_conditions.extend(price_alerts)
 
         return triggered_conditions
 
-    def _check_price_movement(self, price_array, window_sec, thresholds_config):
+    def _check_price_movement(self, stock,price_array, window_sec, thresholds_config):
         triggered_alerts = []
 
         if len(price_array) == 0:
@@ -68,15 +69,31 @@ class AlertChecker:
         price_drop_thresholds = thresholds.get("price_drop", [])
         for threshold in price_drop_thresholds:
             if drawdown_from_high <= threshold:
-                alert_type = f"price_drop_{abs(threshold)}%_{window_sec}s"
-                triggered_alerts.append(alert_type)
+                alert_message = f"price_drop_{abs(threshold)}%_{window_sec}s"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '观察',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                triggered_alerts.append(alert_data)
 
         # 检查上涨阈值
         price_rise_thresholds = thresholds.get("price_rise", [])
         for threshold in price_rise_thresholds:
             if gain_from_low >= threshold:
-                alert_type = f"price_rise_{threshold}%_{window_sec}s"
-                triggered_alerts.append(alert_type)
+                alert_message = f"price_rise_{threshold}%_{window_sec}s"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': 'alert_type',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                triggered_alerts.append(alert_data)
 
         return triggered_alerts
 
@@ -102,7 +119,16 @@ class AlertChecker:
                 condition_met = True
 
             if condition_met:
-                triggered_alerts.append(f"{alert_id}")
+                alert_message = f"{alert_id}"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': 'alert_type',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                triggered_alerts.append(alert_data)
 
         return triggered_alerts
 
@@ -135,9 +161,17 @@ class AlertChecker:
             # 如果当前价格小于等于均线值
             if current_price <= ma_value < candles[-1]['pre_close']:
                 # 生成告警消息
-                message = f"{stock} break{ma_type}ma"
-
-                triggered_alerts.append((message, 1000 * 100))
+                alert_message = f"{stock} break{ma_type}ma"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '观察',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                # 保留冷却时间
+                triggered_alerts.append((alert_data, 1000 * 100))
 
         return triggered_alerts
 
@@ -168,7 +202,16 @@ class AlertChecker:
                 condition_met = True
 
             if condition_met:
-                triggered_alerts.append(f"change_threshold_{alert_id}")
+                alert_message = f"change_threshold_{alert_id}"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '观察',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                triggered_alerts.append(alert_data)
 
         return triggered_alerts
 
@@ -179,7 +222,6 @@ class AlertChecker:
 
         result_arr = []
         results_min = IndexAnalysis.rt_min(stock, window)
-
 
         # 获取最后一个元素的candle_end_time
         last_candle = results_min.iloc[-1]
@@ -217,7 +259,6 @@ class AlertChecker:
         # 获取当前状态
         current_state = self._rsi_trigger_states[state_key]
 
-
         # 修改RSI判断逻辑：检查是否连续触发
         if not 20 <= rsi_6 <= 70:
             # 检查是否连续触发：当前和前一期RSI都不在正常范围内
@@ -226,7 +267,16 @@ class AlertChecker:
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 rsi_6 = max(20, min(rsi_6, 70))
-                result_arr.append(f"({window}min)rsi_6:{rsi_6}")
+                alert_message = f"({window}min)rsi_6:{rsi_6}"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '观察',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                result_arr.append(alert_data)
                 current_state['last_rsi_triggered'] = True
             else:
                 current_state['last_rsi_triggered'] = True  # 更新状态但不触发
@@ -236,25 +286,59 @@ class AlertChecker:
             # 放量阴-阳
             if (prev_k['close'] < prev_k['open'] and  # 前一根是阴线
                 last_k['close'] >= last_k['open']) and last_k['amount'] > prev_k['amount']:
-                result_arr.append(f"({window}min)rsi_6_up")
+                alert_message = f"({window}min)rsi_6_up"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '买点',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                result_arr.append(alert_data)
 
             # 放量阳-阴
             elif (prev_k['close'] > prev_k['open'] and  # 前一根是阳线
                   last_k['close'] <= last_k['open']) and last_k['amount'] > prev_k['amount']:
-                result_arr.append(f"({window}min)rsi_6_down")
+                alert_message = f"({window}min)rsi_6_down"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '卖点',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                result_arr.append(alert_data)
 
         # 检查吞没形态（阳包阴或阴包阳）
         # 阳包阴：当前阳线实体完全包裹前一根阴线实体
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and  # 前一根是阴线
             last_k['close'] > last_k['open']) and last_k['amount'] > prev_k['amount']:
-            result_arr.append(f"({window}min)engulfing_up")
-
-
+            alert_message = f"({window}min)engulfing_up"
+            alert_data = {
+                'stock_code': stock,
+                'stock_name': get_stock_name(stock),
+                'alert_type': '买点',
+                'alert_level': 2,
+                'alert_message': alert_message,
+                'trigger_time': datetime.now()
+            }
+            result_arr.append(alert_data)
 
         # 阴包阳：当前阴线实体完全包裹前一根阳线实体
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and  # 前一根是阳线
               last_k['close'] < last_k['open']) and last_k['amount'] > prev_k['amount']:
-            result_arr.append(f"({window}min)engulfing_down")
+            alert_message = f"({window}min)engulfing_down"
+            alert_data = {
+                'stock_code': stock,
+                'stock_name': get_stock_name(stock),
+                'alert_type': '卖点',
+                'alert_level': 2,
+                'alert_message': alert_message,
+                'trigger_time': datetime.now()
+            }
+            result_arr.append(alert_data)
 
         # 2. 检查阳线-阴线-阳线组合
         # 形态要求：阳线 → 阴线 → 阳线
@@ -267,7 +351,16 @@ class AlertChecker:
             # 检查成交量：两个阳线成交量都大于中间的阴线
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
-                result_arr.append(f"({window}min)up_down_up")
+                alert_message = f"({window}min)up_down_up"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '买点',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                result_arr.append(alert_data)
 
         # 3. 检查阴线-阳线-阴线组合
         # 形态要求：阴线 → 阳线 → 阴线
@@ -280,8 +373,16 @@ class AlertChecker:
             # 检查成交量：两个阴线成交量都大于中间的阳线
             if (prev_prev_k['amount'] > prev_k['amount'] and
                     last_k['amount'] > prev_k['amount']):
-                result_arr.append(f"({window}min)down_up_down")
-        #todo 记录信息到数据库
+                alert_message = f"({window}min)down_up_down"
+                alert_data = {
+                    'stock_code': stock,
+                    'stock_name': get_stock_name(stock),
+                    'alert_type': '卖点',
+                    'alert_level': 2,
+                    'alert_message': alert_message,
+                    'trigger_time': datetime.now()
+                }
+                result_arr.append(alert_data)
         return result_arr
 
     def calculate_ma_distances(self, stock_list):
@@ -332,8 +433,6 @@ class AlertChecker:
                     "current_price":current_price.__round__(2),
                     "ma_value": ma_value.__round__(2)
                 }
-
-
 
             # 将当前股票的结果添加到总结果
             if ma_distances:  # 只添加有结果的股票

@@ -269,9 +269,9 @@ class DatabaseManager:
 
 # 数据库配置
 db_config = {
-    "user": "root",
-    "password": "123456",
-    "host": "127.0.0.1",
+    "user": "trade",
+    "password": "trade",
+    "host": "212.64.32.213",
     "database": "trade",
 }
 
