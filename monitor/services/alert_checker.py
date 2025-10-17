@@ -29,11 +29,10 @@ class AlertChecker:
             alerts.extend(conditions)
 
         if self.config.MONITOR_STOCKS[stock].get("common", False):
-            common_alerts_5 = self._check_common_by_min(stock, 5)
-            alerts.extend(common_alerts_5)
-            common_alerts_1 = self._check_common_by_min(stock, 1)
-            # 处理警报条件：布尔True或非布尔类型
-            alerts.extend(common_alerts_1)
+            periods = [1,5,30]
+            for period in periods:
+                common_alerts = self._check_common_by_min(stock, period)
+                alerts.extend(common_alerts)
 
         return alerts
 
@@ -72,6 +71,7 @@ class AlertChecker:
                 alert_message = f"price_drop_{abs(threshold)}%_{window_sec}s"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window_sec,
                     'stock_name': get_stock_name(stock),
                     'alert_type': '观察',
                     'alert_level': 2,
@@ -87,6 +87,7 @@ class AlertChecker:
                 alert_message = f"price_rise_{threshold}%_{window_sec}s"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window_sec,
                     'stock_name': get_stock_name(stock),
                     'alert_type': 'alert_type',
                     'alert_level': 2,
@@ -270,6 +271,7 @@ class AlertChecker:
                 alert_message = f"({window}min)rsi_6:{rsi_6}"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window,
                     'stock_name': get_stock_name(stock),
                     'alert_type': '观察',
                     'alert_level': 2,
@@ -282,13 +284,14 @@ class AlertChecker:
                 current_state['last_rsi_triggered'] = True  # 更新状态但不触发
         else:
             current_state['last_rsi_triggered'] = False  # RSI回到正常范围，重置状态
-        if not 20 <= pre_rsi_6 <= 70:
+        if pre_rsi_6 <= 20:
             # 放量阴-阳
             if (prev_k['close'] < prev_k['open'] and  # 前一根是阴线
                 last_k['close'] >= last_k['open']) and last_k['amount'] > prev_k['amount']:
                 alert_message = f"({window}min)rsi_6_up"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window,
                     'stock_name': get_stock_name(stock),
                     'alert_type': '买点',
                     'alert_level': 2,
@@ -296,13 +299,14 @@ class AlertChecker:
                     'trigger_time': datetime.now()
                 }
                 result_arr.append(alert_data)
-
+        if pre_rsi_6 >= 70:
             # 放量阳-阴
-            elif (prev_k['close'] > prev_k['open'] and  # 前一根是阳线
+            if (prev_k['close'] > prev_k['open'] and  # 前一根是阳线
                   last_k['close'] <= last_k['open']) and last_k['amount'] > prev_k['amount']:
                 alert_message = f"({window}min)rsi_6_down"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window,
                     'stock_name': get_stock_name(stock),
                     'alert_type': '卖点',
                     'alert_level': 2,
@@ -354,6 +358,7 @@ class AlertChecker:
                 alert_message = f"({window}min)up_down_up"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window ,
                     'stock_name': get_stock_name(stock),
                     'alert_type': '买点',
                     'alert_level': 2,
@@ -376,6 +381,7 @@ class AlertChecker:
                 alert_message = f"({window}min)down_up_down"
                 alert_data = {
                     'stock_code': stock,
+                    'windows_sec': window,
                     'stock_name': get_stock_name(stock),
                     'alert_type': '卖点',
                     'alert_level': 2,
