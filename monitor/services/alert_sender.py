@@ -7,7 +7,6 @@ from monitor.config.db_monitor import stock_alert_dao
 class AlertSender:
     def __init__(self, config):
         self.config = config
-        self.alerts_history = []
         self.last_alert_time = {}
 
         for stock in self.config.MONITOR_STOCKS.keys():
@@ -52,8 +51,7 @@ class AlertSender:
                 alert_data['stock_code'] = stock
 
             # 构建显示消息
-            alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {current_time.strftime('%H:%M:%S')}"
-            self.alerts_history.append(alert_info)
+            alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {alert_data['trigger_time']}"
 
             # 发送钉钉消息
             send_dingtalk_message(alert_info, stock)
@@ -61,5 +59,3 @@ class AlertSender:
             # 插入数据库 - 直接使用alert_data
             stock_alert_dao.insert_alert(alert_data)
 
-    def get_alert_history(self):
-        return self.alerts_history
