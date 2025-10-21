@@ -4,7 +4,6 @@ from flask import Flask, jsonify
 import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 
-from monitor.services.volume_radio import get_volume_ratio_simple
 from utils.tushare_utils import IndexAnalysis
 from flask_cors import CORS
 
@@ -18,6 +17,8 @@ from services.data_fetcher import DataFetcher
 from services.alert_checker import AlertChecker
 from services.alert_sender import AlertSender
 from services.stock_monitor import StockMonitor
+from services.volume_radio import get_volume_ratio_simple
+
 import threading
 
 app = Flask(__name__)
@@ -69,7 +70,7 @@ def reload_config():
 
     # 启动监控线程
 
-if __name__ == "__main__":
+if __name__ == "__main__" or "monitor.app":
     monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
     monitor_thread.start()
 
