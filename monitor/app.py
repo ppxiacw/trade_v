@@ -4,7 +4,6 @@ from flask import Flask, jsonify
 import urllib3
 from urllib3.exceptions import InsecureRequestWarning
 
-from utils.tushare_utils import IndexAnalysis
 from flask_cors import CORS
 
 # 禁用 HTTPS 不安全请求警告
@@ -18,6 +17,7 @@ from services.alert_checker import AlertChecker
 from services.alert_sender import AlertSender
 from services.stock_monitor import StockMonitor
 from services.volume_radio import get_volume_ratio_simple
+from utils.tushare_utils import IndexAnalysis
 
 import threading
 
