@@ -239,7 +239,7 @@ class AlertChecker:
         if not 20 <= rsi_6 <= 70:
             is_consecutive_trigger = (pre_rsi_6 is not None and not 20 <= pre_rsi_6 <= 70)
 
-            if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
+            if (not is_consecutive_trigger or not current_state['last_rsi_triggered']) and window != 1:
                 rsi_6 = max(20, min(rsi_6, 70))
                 current_state['last_rsi_triggered'] = True
                 return self._create_alert_data(
