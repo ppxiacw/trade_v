@@ -8,6 +8,12 @@ from monitor.services.volume_radio import get_volume_ratio_simple
 from utils.tushare_utils import IndexAnalysis
 from flask_cors import CORS
 
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 将根目录插入到`sys.path`的最前面（优先级最高）
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 # 禁用 HTTPS 不安全请求警告
 urllib3.disable_warnings(InsecureRequestWarning)# 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
