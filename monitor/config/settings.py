@@ -1,6 +1,6 @@
 import os
 import json
-from ...utils.tushare_utils import token
+from utils.tushare_utils import token
 
 class Config:
     def __init__(self):
