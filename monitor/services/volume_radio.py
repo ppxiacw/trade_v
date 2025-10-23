@@ -1,3 +1,5 @@
+import logging
+
 import pandas as pd
 from datetime import datetime
 from utils.tushare_utils import IndexAnalysis, pro
@@ -138,68 +140,7 @@ def get_volume_ratio_batch(stock_list, current_time=None):
     return volume_ratios
 
 
-def format_volume_data_table(data_dict):
-    """
-    将成交量数据字典格式化为表格字符串
-    """
-    if not data_dict:
-        return "暂无数据"
-
-    # 定义表格列
-    headers = ["股票代码", "今日成交量", "前日成交量", "量比", "当前时间", "前交易日"]
-
-    # 计算每列的最大宽度
-    col_widths = [len(header) for header in headers]
-
-    # 更新列宽基于数据内容
-    for stock, info in data_dict.items():
-        col_widths[0] = max(col_widths[0], len(stock))
-        col_widths[1] = max(col_widths[1], len(f"{info['today_volume']:,.2f}"))
-        col_widths[2] = max(col_widths[2], len(f"{info['previous_volume']:,.2f}"))
-        col_widths[3] = max(col_widths[3], len(f"{info['volume_ratio']:.4f}"))
-        col_widths[4] = max(col_widths[4], len(info['current_time']))
-        col_widths[5] = max(col_widths[5], len(info['previous_trade_date']))
-
-    # 每列增加2个字符的边距
-    col_widths = [w + 2 for w in col_widths]
-
-    # 构建表格
-    table_lines = []
-
-    # 表头分隔线
-    separator = "+" + "+".join("-" * w for w in col_widths) + "+"
-    table_lines.append(separator)
-
-    # 表头
-    header_line = "|"
-    for i, header in enumerate(headers):
-        header_line += f" {header:<{col_widths[i] - 1}}|"
-    table_lines.append(header_line)
-    table_lines.append(separator)
-
-    # 数据行
-    for stock, info in data_dict.items():
-        row_line = "|"
-        row_line += f" {stock:<{col_widths[0] - 1}}|"
-        row_line += f" {get_stock_name(stock):>{col_widths[1] - 2}} |"
-        row_line += f" {info['today_volume']:>{col_widths[1] - 2},.2f} |"
-        row_line += f" {info['previous_volume']:>{col_widths[2] - 2},.2f} |"
-        row_line += f" {info['volume_ratio']:>{col_widths[3] - 2}.4f} |"
-        row_line += f" {info['current_time']:<{col_widths[4] - 1}}|"
-        row_line += f" {info['previous_trade_date']:<{col_widths[5] - 1}}|"
-        table_lines.append(row_line)
-
-    table_lines.append(separator)
-    print("\n".join(table_lines))
 
 
-# 修改原函数以返回表格
 def get_volume_ratio_simple(stock_list, current_time=None):
-    """
-    简化版本，以表格形式返回所有成交量数据
-    """
-    full_data = get_volume_ratio_batch(stock_list, current_time)
-
-
-    # 返回表格形式的字符串
-    return format_volume_data_table(full_data)
+    return get_volume_ratio_batch(stock_list, current_time)

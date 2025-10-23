@@ -30,7 +30,7 @@ class StockMonitor:
         return morning_session or afternoon_session
 
     def start_monitoring(self):
-        print(f"开始监控 {len(self.config.MONITOR_STOCKS)} 个")
+        logging.info(f"开始监控 {len(self.config.MONITOR_STOCKS)} 个")
         stock_codes = list(self.config.MONITOR_STOCKS.keys())
 
         # 使用线程池处理数据和检查

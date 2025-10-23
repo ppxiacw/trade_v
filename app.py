@@ -51,8 +51,8 @@ def volume_ratio(stock_codes=None):
         stock_codes = list(config.CONFIG_LIST.keys())
     else:
         stock_codes = stock_codes.split(',')
-    get_volume_ratio_simple(stock_codes)
-    return 'success'
+
+    return get_volume_ratio_simple(stock_codes)
 
 @app.route('/api/ma', methods=['GET'])
 @app.route('/api/ma/<string:stock_codes>', methods=['GET'])
