@@ -237,6 +237,8 @@ class AlertChecker:
         return alerts
 
     def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6):
+        if window == 1:
+            return None
         """检查RSI边界条件"""
         state_key = f"{stock}_{window}"
         if state_key not in self._rsi_trigger_states:
@@ -248,7 +250,6 @@ class AlertChecker:
             is_consecutive_trigger = (pre_rsi_6 is not None and not 20 <= pre_rsi_6 <= 70)
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
-                rsi_6 = max(20, min(rsi_6, 70))
                 current_state['last_rsi_triggered'] = True
                 return self._create_alert_data(
                     stock, f"({window}min)rsi_6:{rsi_6}", window, '观察'
@@ -294,6 +295,8 @@ class AlertChecker:
         return alerts
 
     def _check_engulfing_pattern(self, stock, window, last_k, prev_k):
+        if window == 1:
+            return None
         """检查吞没形态"""
         # 阳包阴
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and
@@ -313,6 +316,8 @@ class AlertChecker:
 
     def _check_triple_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k):
         """检查三根K线组合模式"""
+        if window == 1:
+            return []
         alerts = []
 
         # 阳-阴-阳组合
