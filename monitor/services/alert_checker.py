@@ -26,8 +26,8 @@ class AlertChecker:
         alerts.extend(ma_alerts)
 
         # 检查时间窗口内涨跌条件
-        for window_sec in self.config.MONITOR_STOCKS.get(stock, {}).get("windows_sec", []):
-            conditions = self._check_time_window_conditions(stock, window_sec)
+        if self.config.MONITOR_STOCKS.get(stock, {}).get("normal_movement"):
+            conditions = self._check_time_window_conditions(stock, 20)
             alerts.extend(conditions)
 
         if self.config.MONITOR_STOCKS[stock].get("common", False):
@@ -50,7 +50,15 @@ class AlertChecker:
             return []
 
         window_str = str(window_sec)
-        thresholds = thresholds_config["thresholds"].get(window_str, {})
+        thresholds =     {
+                            "price_drop": [
+                              -0.7
+                            ],
+                            "price_rise": [
+                              0.7
+                            ]
+                          }
+
         window_length = window_sec // self.config.BASE_INTERVAL
 
         recent_prices = price_array[-window_length:] if len(price_array) >= window_length else price_array

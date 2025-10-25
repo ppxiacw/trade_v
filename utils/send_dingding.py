@@ -33,7 +33,7 @@ def send_dingtalk_message(title, tsCode, webhook_url=common):
         }
     }
     logging.info(title + "\n")
-    requests.post(webhook_url, headers=headers, json=data, verify=False)
+    # requests.post(webhook_url, headers=headers, json=data, verify=False)
 
 
 def generate_stock_image_url(stock_code: str, k_type='min') -> str:
