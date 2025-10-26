@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+import os
 import threading
 import time
 from datetime import datetime, time as dt_time
@@ -38,10 +39,10 @@ class StockMonitor:
 
         while True:
             # 检查市场是否开盘
-            # if not self.is_market_open():
-            #     logging.info("市场已收盘，停止监控")
-            #     time.sleep(60)  # 每分钟检查一次市场是否重新开盘
-            #     continue
+            if not self.is_market_open() and os.getenv('ENABLE_REQUESTS') is None:
+                logging.info("市场已收盘，停止监控")
+                time.sleep(60)  # 每分钟检查一次市场是否重新开盘
+                continue
 
             # 获取数据
             data_list = self.data_fetcher.fetch_realtime_data(stock_codes)
