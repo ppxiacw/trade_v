@@ -1,3 +1,5 @@
+import os
+
 import requests
 import json
 import random
@@ -33,7 +35,8 @@ def send_dingtalk_message(title, tsCode, webhook_url=common):
         }
     }
     logging.info(title + "\n")
-    # requests.post(webhook_url, headers=headers, json=data, verify=False)
+    if os.getenv('ENABLE_REQUESTS') is None:
+        requests.post(webhook_url, headers=headers, json=data, verify=False)
 
 
 def generate_stock_image_url(stock_code: str, k_type='min') -> str:
