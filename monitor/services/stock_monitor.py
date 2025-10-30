@@ -25,7 +25,7 @@ class StockMonitor:
             return False
 
         # 交易时段：9:30-11:30 和 13:00-15:00
-        morning_session = dt_time(9, 20) <= now <= dt_time(11, 30)
+        morning_session = dt_time(9, 30) <= now <= dt_time(11, 30)
         afternoon_session = dt_time(13, 0) <= now <= dt_time(15, 0)
 
         return morning_session or afternoon_session

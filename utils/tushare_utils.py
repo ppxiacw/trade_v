@@ -274,7 +274,7 @@ if __name__ == "__main__":
     # 获取浦发银行60000.SH的历史分钟数据
     # 示例：计算平安银行（000001.SZ）今日成交量与昨日的比值
     # ratio = IndexAnalysis.get_volume_ratio('000831.SZ', k_type=1)
-    v =  IndexAnalysis.my_pro_bar('560860.SH')
+    v =  IndexAnalysis.realtime_quote('399006.SZ')
     print(v)
 
 
