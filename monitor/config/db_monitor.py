@@ -270,7 +270,7 @@ class DatabaseManager:
 # 数据库配置
 db_config = {
     "user": "trade",
-    "password": "trade",
+    "password": "trade007576!",
     "host": "212.64.32.213",
     "database": "trade",
 }
