@@ -32,9 +32,10 @@ parent_dir_path = os.path.dirname(dir_path)
 
 # 构造相对路径
 relative_path = os.path.join(parent_dir_path, 'files')
-os.environ["TUSHARE_TOKEN_PATH"] = str(Path.home() / "tushare_token.csv")
-
 token = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
+
+token_file = os.path.join(os.getcwd(), "tk.csv")
+
 ts.set_token(token)
 pro = ts.pro_api(token)
 
