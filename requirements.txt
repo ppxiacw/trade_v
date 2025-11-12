@@ -12,3 +12,4 @@ SQLAlchemy==2.0.44
 tushare==1.4.21
 urllib3==1.26.20
 mysql-connector-python==8.0.33
+akshare==1.17.16
