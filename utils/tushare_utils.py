@@ -36,7 +36,6 @@ token = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 
 token_file = os.path.join(os.getcwd(), "tk.csv")
 
-ts.set_token(token)
 pro = ts.pro_api(token)
 
 stock_list = result

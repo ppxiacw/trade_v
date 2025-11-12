@@ -1,42 +1,55 @@
-
-import tushare as ts
+import akshare as ak
 import json
 from monitor.config.db_monitor import exe_query
-token = '410070664c78124d98ca5e81c3921530bd27534856b174c702d698a5'
 
-# 初始化
-pro = ts.pro_api(token)
+
+def convert_code_format(code):
+    """
+    将股票代码转换为带交易所后缀的格式
+    规则：
+    - 6开头 -> .SH (上交所)
+    - 0或3开头 -> .SZ (深交所)
+    """
+    if code.startswith('6'):
+        return f"{code}.SH"
+    elif code.startswith('0') or code.startswith('3'):
+        return f"{code}.SZ"
+    else:
+        # 其他情况，默认返回深交所格式
+        return f"{code}.SZ"
+
 
 try:
-    # 获取最近交易日
-    last_trade_date = pro.trade_cal(exchange='SSE', end_date='20250903', is_open=1)['cal_date'].iloc[-1]
+    # 使用 akshare 获取A股代码和名称
+    result_df = ak.stock_info_a_code_name()
 
-    # 获取基础信息
-    result = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name')
+    # 创建以转换后的ts_code为键的字典，保持与之前代码兼容的结构
+    records = result_df.to_dict(orient='records')
+    result_dict = {}
 
-    # 获取市值数据
-    # df_daily = pro.daily_basic(
-    #     trade_date=Date_utils.get_date_by_step(Date_utils.get_today(replace=True),-1,True),
-    #     fields='ts_code,close,total_mv',
-    #     limit=6000  # 关键：指定获取数据量
-    # )
+    for record in records:
+        # 获取原始代码和名称
+        original_code = record['code']
+        name = record['name']
 
-    # # 合并结果
-    # result = pd.merge(df_basic, df_daily, on='ts_code')
-    #
-    # # 转换市值单位：万元 → 亿元
-    # result['total_mv'] = (result['total_mv'] / 10000).round().astype(int)
+        # 转换为带后缀的格式
+        ts_code = convert_code_format(original_code)
 
-    # 创建以ts_code为键的字典
-    # 首先将DataFrame转换为字典列表
-    records = result.to_dict(orient='records')
+        # 构建结果字典
+        result_dict[ts_code] = {
+            'ts_code': ts_code,
+            'symbol': original_code,  # 保持原始代码格式
+            'name': name
+        }
 
-    # 创建以ts_code为键的字典
-    result_dict = {record['ts_code']: record for record in records}
+    # 保持与之前代码的兼容性
+    result = result_dict
 
 except Exception as e:
     print(f"发生错误: {str(e)}")
     print(json.dumps({"error": str(e)}, indent=4))
+    result_dict = {}
+    result = {}
 
 
 def get_stock_name(stock_code):
@@ -50,11 +63,21 @@ def get_stock_name(stock_code):
                 return name
 
         # 如果 config 中没有，尝试从 result_dict 中获取
+        # 注意：这里我们同时支持原始代码格式和带后缀格式
         if stock_code in result_dict:
-            name = result_dict[stock_code].get('stock_name')
+            name = result_dict[stock_code].get('name')
             if name:  # 如果有值则返回
                 return name
+        else:
+            # 如果直接查找失败，尝试转换格式后再查找
+            converted_code = convert_code_format(stock_code)
+            if converted_code in result_dict:
+                name = result_dict[converted_code].get('name')
+                if name:  # 如果有值则返回
+                    return name
 
         return stock_code
     except Exception as e:
         return stock_code
+
+print(get_stock_name('000001.SZ'))

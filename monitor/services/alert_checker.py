@@ -22,8 +22,8 @@ class AlertChecker:
         change_threshold_alerts = self._check_change_thresholds(stock)
         alerts.extend(change_threshold_alerts)
 
-        ma_alerts = self._check_ma_breakdown(stock)
-        alerts.extend(ma_alerts)
+        # ma_alerts = self._check_ma_breakdown(stock)
+        # alerts.extend(ma_alerts)
 
         # 检查时间窗口内涨跌条件
         if self.config.MONITOR_STOCKS.get(stock, {}).get("normal_movement"):
