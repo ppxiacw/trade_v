@@ -6,9 +6,9 @@ from sqlalchemy import create_engine
 db_pool = pooling.MySQLConnectionPool(
     pool_name="flask_pool",
     pool_size=10,
-    host='127.0.0.1',
-    user='root',
-    password='123456',
+    host='212.64.32.213',
+    user='trade',
+    password='trade007576!',
     database='trade',
     autocommit=True,  # 自动提交事务
     pool_reset_session=True,  # 允许重置会话
@@ -16,9 +16,9 @@ db_pool = pooling.MySQLConnectionPool(
 )
 
 db_config = {
-    "user": "root",
-    "password": "123456",
-    "host": "127.0.0.1",  # 或者你的服务器IP地址
+    "user": "trade",
+    "password": "trade007576!",
+    "host":'212.64.32.213',  # 或者你的服务器IP地址
     "database": "trade",
 
 }
