@@ -1,20 +1,19 @@
+import logging
 import base64
 import io
 import logging
-import sys
-import os
-from flask import Flask, jsonify, request
-import urllib3
-from urllib3.exceptions import InsecureRequestWarning
-from flask import Flask, request, jsonify
-from flask_cors import CORS  # 解决跨域问题
-from PIL import Image
-import requests
-import io
 import random
-import base64
-from utils.tushare_utils import IndexAnalysis
+import sys
+
+import requests
+import urllib3
+from PIL import Image
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+from urllib3.exceptions import InsecureRequestWarning
+
+from utils.tushare_utils import IndexAnalysis
+
 # 在app.py开头添加
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
@@ -32,7 +31,6 @@ from monitor.services.stock_monitor import StockMonitor
 from monitor.services.volume_radio import get_volume_ratio_simple
 from config.dbconfig import  exeQuery
 from utils.common import format_stock_code
-import threading
 
 app = Flask(__name__)
 CORS(app)
