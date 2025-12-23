@@ -237,8 +237,8 @@ class AlertChecker:
         return alerts
 
     def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6):
-        if window == 1:
-            return None
+        # if window == 1:
+        #     return None
         """检查RSI边界条件"""
         state_key = f"{stock}_{window}"
         if state_key not in self._rsi_trigger_states:

@@ -14,7 +14,7 @@ class Config:
         self.MONITOR_STOCKS = self.load_monitor_stocks_config()
 
     def load_monitor_stocks_config(self):
-        value = exe_query('select * from stocks')
+        value = exe_query('select * from stocks where is_monitor = 1')
         self.CONFIG_LIST = {item['stock_code']: item for item in value}
         return self.CONFIG_LIST
 

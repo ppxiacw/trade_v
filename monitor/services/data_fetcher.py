@@ -27,10 +27,10 @@ class DataFetcher:
         else:
             # 如果输入是单个股票代码（字符串），直接使用
             if isinstance(stock_codes, str):
-                return IndexAnalysis.realtime_quote(ts_code=stock_codes)
+                return IndexAnalysis.realtime_quote(ts_codes=stock_codes)
             # 如果输入是股票代码列表，使用join连接
             elif isinstance(stock_codes, list):
-                return IndexAnalysis.realtime_quote(ts_code=",".join(stock_codes))
+                return IndexAnalysis.realtime_quote(ts_codes=",".join(stock_codes))
             # 其他类型输入处理
             else:
                 raise ValueError("stock_codes 必须是字符串或列表类型")

@@ -5,7 +5,6 @@ import tushare as ts
 import pandas as pd
 from dto.StockDataDay import StockDataDay
 from dto.RealTimeStockData import RealTimeStockData
-from datetime import datetime  # 正确导入 datetime 类
 import warnings
 import ssl
 
@@ -18,7 +17,7 @@ from random import randint  # python自带的随机数库
 import pandas as pd
 from utils.date_utils import Date_utils
 from datetime import datetime, timedelta
-
+from utils.common import format_stock_code
 pd.set_option('expand_frame_repr', False)  # 当列太多时不换行
 
 # 获取当前脚本的完整路径
@@ -61,8 +60,22 @@ class IndexAnalysis:
         return StockDataDay.from_daily_dataframe(v)
 
     @staticmethod
-    def realtime_quote(ts_code):
-        v: pd = ts.realtime_quote(ts_code=ts_code)
+    def realtime_quote(ts_codes):
+        # 将逗号分割的字符串转换为列表
+        code_list = [code.strip() for code in ts_codes.split(',') if code.strip()]
+
+        # 对每个代码调用format_stock_code处理
+        formatted_codes = []
+        for code in code_list:
+            formatted_code = format_stock_code(code, 'suffix')
+            formatted_codes.append(formatted_code)
+
+        # 将处理后的代码重新组合成逗号分割的字符串
+        ts_codes_str = ','.join(formatted_codes)
+
+        # 调用ts.realtime_quote
+        v: pd = ts.realtime_quote(ts_code=ts_codes_str)
+
         arr = []
         for item in v.iterrows():
             arr.append(RealTimeStockData.from_dataframe(item[1].to_frame().T))

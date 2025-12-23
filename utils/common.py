@@ -108,9 +108,5 @@ if __name__ == "__main__":
 
     print("测试结果：")
     for input_code, fmt, expected in test_cases:
-        try:
-            result = format_stock_code(input_code, fmt)
-            status = "✓" if result == expected else "✗"
-            print(f"{status} {input_code:12} -> {fmt:8} => {result:15} (期望: {expected})")
-        except Exception as e:
-            print(f"✗ {input_code:12} -> {fmt:8} => 错误: {e}")
+        result = format_stock_code(input_code, fmt)
+        print(result)
