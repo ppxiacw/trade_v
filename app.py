@@ -1,27 +1,20 @@
-import logging
-import base64
 import io
-import logging
-import random
 import sys
 import threading
 
-import requests
 import urllib3
-from PIL import Image
-from flask import Flask, request, jsonify
+from flask import Flask
 from flask_cors import CORS
 from urllib3.exceptions import InsecureRequestWarning
 
 from utils.tushare_utils import IndexAnalysis
 
-# 在app.py开头添加
+# 设置标准输出编码为 UTF-8
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # 禁用 HTTPS 不安全请求警告
-urllib3.disable_warnings(InsecureRequestWarning)# 添加项目根目录到 Python 路径
-# sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+urllib3.disable_warnings(InsecureRequestWarning)
 
 from monitor.config.settings import Config
 from monitor.models.stock_data import StockData
