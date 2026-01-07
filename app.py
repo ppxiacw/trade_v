@@ -24,7 +24,7 @@ from monitor.services.alert_checker import AlertChecker
 from monitor.services.alert_sender import AlertSender
 from monitor.services.stock_monitor import StockMonitor
 
-# ==================== 应用初始化 ====================
+# ==================== 应用初始化1 ====================
 
 app = Flask(__name__)
 CORS(app)
