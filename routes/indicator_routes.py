@@ -150,23 +150,15 @@ def test_kline(stock_code):
 @indicator_bp.route('/rsi/<string:stock_code>', methods=['GET'])
 def get_rsi(stock_code=None):
     """
-    获取股票RSI值
+    获取股票RSI值（精简版）
     
     参数:
         stock_code: 股票代码 (路径参数或查询参数)
         period: K线周期，默认 m30 (查询参数)
-        rsi_period: RSI计算周期，默认 6 (查询参数)
     
     返回:
         {
-            "success": true,
-            "data": {
-                "stock_code": "sh600519",
-                "period": "m30",
-                "rsi6": 45.32,
-                "rsi12": 52.18,
-                "condition_met": true  // RSI是否在20-80之间
-            }
+            "rsi": 45.32  // RSI6值
         }
     """
     try:
@@ -175,7 +167,7 @@ def get_rsi(stock_code=None):
             stock_code = request.args.get('stock_code')
         
         if not stock_code:
-            return jsonify({'success': False, 'message': '缺少股票代码参数'}), 400
+            return jsonify({'error': '缺少股票代码参数'}), 400
         
         period = request.args.get('period', 'm30')
         
@@ -183,42 +175,22 @@ def get_rsi(stock_code=None):
         df = fetch_kline_data(stock_code, period, count=100)
         
         if df is None or len(df) < 15:
-            return jsonify({
-                'success': False, 
-                'message': f'获取 {stock_code} {period} K线数据失败或数据不足'
-            }), 400
+            return jsonify({'error': f'获取K线数据失败'}), 400
         
         # 计算RSI
         rsi_values = IndicatorCalculation.get_rsi_values(df)
         
         rsi6 = rsi_values.get('RSI6')
-        rsi12 = rsi_values.get('RSI12')
         
         # 转换为 Python 原生类型（避免 numpy 类型序列化问题）
         rsi6 = float(rsi6) if rsi6 is not None else None
-        rsi12 = float(rsi12) if rsi12 is not None else None
-        
-        # 判断条件：RSI在20-80之间（不是超买超卖状态）
-        # 条件描述是 "RSI低于20或高于80"，意思是RSI在超卖或超买区域
-        # 所以 condition_met = True 表示 RSI < 20 或 RSI > 80
-        condition_met = False
-        if rsi6 is not None:
-            condition_met = bool(rsi6 < 20 or rsi6 > 80)
         
         return jsonify({
-            'success': True,
-            'data': {
-                'stock_code': stock_code,
-                'period': period,
-                'rsi6': rsi6,
-                'rsi12': rsi12,
-                'condition_met': condition_met,
-                'condition_desc': 'RSI6 < 20 or RSI6 > 80'
-            }
+            'rsi': rsi6
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'message': f'计算RSI失败: {str(e)}'}), 500
+        return jsonify({'error': f'计算RSI失败: {str(e)}'}), 500
 
 
 @indicator_bp.route('/rsi/batch', methods=['POST'])
