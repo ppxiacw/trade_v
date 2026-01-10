@@ -46,3 +46,4 @@ nohup python app.py >> /www/wwwlogs/trade_v_app.log 2>&1 &
 echo "部署完成: $(date '+%Y-%m-%d %H:%M:%S')" >> $LOG_FILE
 echo "=============================" >> $LOG_FILE
 
+
