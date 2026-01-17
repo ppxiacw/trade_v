@@ -91,15 +91,24 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
             return None
         
         # 转换为DataFrame
-        # K线数据格式可能有多种：6列、7列或8列
-        # 常见格式: [time, open, close, high, low, volume, amount, ...]
-        num_cols = len(kline_data[0]) if kline_data else 0
+        # K线数据格式可能有多种：6列、7列、8列甚至更多
+        # 日K线格式: [time, open, close, high, low, volume, amount, turnover, ...]
+        # 分钟线格式: [time, open, close, high, low, volume, ...]
+        # 找出数据中最大的列数
+        max_cols = max(len(row) for row in kline_data) if kline_data else 0
         
-        # 定义所有可能的列名
-        all_columns = ['time', 'open', 'close', 'high', 'low', 'volume', 'amount', 'extra']
-        columns = all_columns[:num_cols]
+        # 定义所有可能的列名（增加更多以防数据列更多）
+        all_columns = ['time', 'open', 'close', 'high', 'low', 'volume', 'amount', 'turnover', 'extra1', 'extra2']
+        columns = all_columns[:max_cols]
         
-        df = pd.DataFrame(kline_data, columns=columns)
+        # 确保每行数据列数一致
+        normalized_data = []
+        for row in kline_data:
+            if len(row) < max_cols:
+                row = list(row) + [None] * (max_cols - len(row))
+            normalized_data.append(row[:max_cols])
+        
+        df = pd.DataFrame(normalized_data, columns=columns)
         
         # 确保数值类型
         for col in ['open', 'close', 'high', 'low', 'volume']:
@@ -191,6 +200,91 @@ def get_rsi(stock_code=None):
         
     except Exception as e:
         return jsonify({'error': f'计算RSI失败: {str(e)}'}), 500
+
+
+@indicator_bp.route('/daily-condition/<string:stock_code>', methods=['GET'])
+def check_daily_condition(stock_code):
+    """
+    检查日线是否良好（前20交易日内是否出现过放量阴线）
+    
+    参数:
+        stock_code: 股票代码 (路径参数)
+        days: 检查的交易日数量，默认20 (查询参数)
+    
+    返回:
+        {
+            "is_good": true/false,  // 日线是否良好（没有放量阴线为true）
+            "volume_bars": [...]    // 放量阴线详情（如果有）
+        }
+    
+    判断逻辑:
+        - 阴线：收盘价 < 开盘价
+        - 放量：阴线的成交量 > 前5个交易日内任意一根阳线的成交量
+    """
+    try:
+        days = int(request.args.get('days', 20))
+        lookback = int(request.args.get('lookback', 5))  # 向前查找的交易日数
+        
+        # 获取日K线数据（多获取一些用于找之前的阳线）
+        df = fetch_kline_data(stock_code, 'day', count=days + 20)
+        
+        if df is None or len(df) < days:
+            return jsonify({'error': '获取日K线数据失败'}), 400
+        
+        # 判断阴线阳线
+        # 阳线：收盘价 >= 开盘价
+        # 阴线：收盘价 < 开盘价
+        df['is_positive'] = df['close'] >= df['open']
+        df['is_negative'] = df['close'] < df['open']
+        
+        # 获取前lookback个交易日内阳线的最小成交量
+        # 对于每根K线，找到它前lookback个交易日内阳线中的最小成交量
+        min_prev_positive_volume = []
+        for i in range(len(df)):
+            # 向前查找lookback个交易日内的阳线最小成交量
+            min_volume = None
+            start_idx = max(0, i - lookback)
+            for j in range(i - 1, start_idx - 1, -1):
+                if df.iloc[j]['is_positive']:
+                    vol = df.iloc[j]['volume']
+                    if min_volume is None or vol < min_volume:
+                        min_volume = vol
+            min_prev_positive_volume.append(min_volume)
+        
+        df['min_prev_positive_volume'] = min_prev_positive_volume
+        
+        # 只检查最近days天的数据
+        df_check = df.tail(days).copy()
+        
+        # 判断放量阴线：阴线 且 成交量 > 前lookback个交易日内阳线的最小成交量
+        df_check['is_volume_negative'] = (
+            df_check['is_negative'] & 
+            df_check['min_prev_positive_volume'].notna() &
+            (df_check['volume'] > df_check['min_prev_positive_volume'])
+        )
+        
+        # 找出所有放量阴线
+        volume_bars = df_check[df_check['is_volume_negative']][
+            ['time', 'open', 'close', 'volume', 'min_prev_positive_volume']
+        ].to_dict('records')
+        
+        # 转换为原生类型
+        for bar in volume_bars:
+            bar['open'] = float(bar['open'])
+            bar['close'] = float(bar['close'])
+            bar['volume'] = float(bar['volume'])
+            bar['min_prev_positive_volume'] = float(bar['min_prev_positive_volume']) if bar['min_prev_positive_volume'] else None
+        
+        is_good = len(volume_bars) == 0
+        
+        return jsonify({
+            'is_good': is_good,
+            'volume_bars': volume_bars,
+            'checked_days': days
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'检查日线条件失败: {str(e)}'}), 500
 
 
 @indicator_bp.route('/rsi/batch', methods=['POST'])
