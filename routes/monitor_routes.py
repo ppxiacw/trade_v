@@ -51,10 +51,10 @@ def calculate_ma_distances(stock_codes=None):
 
 @monitor_bp.route('/stocks', methods=['GET'])
 def get_monitor_stocks():
-    """获取所有监控股票列表"""
+    """获取监控中的股票列表"""
     try:
-        # 先查询表结构，获取实际存在的列
-        query = "SELECT * FROM stocks ORDER BY is_monitor DESC, stock_code ASC"
+        # 只查询监控中的股票
+        query = "SELECT * FROM stocks WHERE is_monitor = 1 ORDER BY stock_code ASC"
         stocks = db_manager.execute_query(query)
         
         # 为每个股票添加默认的配置字段（如果不存在）
