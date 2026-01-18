@@ -48,9 +48,9 @@ register_routes(app)
 # ==================== 启动应用 ====================
 
 if __name__ == "__main__" or __name__ == 'app':
-    # 启动监控线程
-    monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
-    monitor_thread.start()
+    # 启动监控线程（开市时启用）
+    # monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
+    # monitor_thread.start()
 
-    # 启动Flask应用
-    app.run(host='0.0.0.0', port=5000)
+    # 启动Flask应用（启用多线程以支持并发请求）
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

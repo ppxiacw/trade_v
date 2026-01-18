@@ -17,6 +17,6 @@ def register_routes(app: Flask):
     app.register_blueprint(stock_bp, url_prefix='/api')
     app.register_blueprint(order_bp, url_prefix='/api')
     app.register_blueprint(group_bp, url_prefix='/api')
-    app.register_blueprint(monitor_bp, url_prefix='/api')
+    app.register_blueprint(monitor_bp, url_prefix='/api/monitor')
     app.register_blueprint(indicator_bp, url_prefix='/api/indicator')
 

@@ -66,7 +66,7 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
         kline_key = period
     
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
         text = response.text
         
         # 解析 JSONP 响应
@@ -142,7 +142,7 @@ def test_kline(stock_code):
     url = f'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param={formatted_code},{period},,100&_var=kline_{period}'
     
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
         text = response.text[:500]  # 只返回前500字符
         
         return jsonify({
