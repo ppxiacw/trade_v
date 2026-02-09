@@ -31,7 +31,7 @@ class StockMonitor:
         return morning_session or afternoon_session
 
     def start_monitoring(self):
-        logging.info(f"开始监控 {len(self.config.MONITOR_STOCKS)} 个")
+        logging.info(f"开始监控 {len(self.config.MONITOR_STOCKS)} 个股票")
         stock_codes = list(self.config.MONITOR_STOCKS.keys())
 
         # 使用线程池处理数据和检查
@@ -39,25 +39,35 @@ class StockMonitor:
 
         while True:
             # 检查市场是否开盘
-            if not self.is_market_open() and os.getenv('ENABLE_REQUESTS') is None:
-                logging.info("市场已收盘，停止监控")
-                time.sleep(60)  # 每分钟检查一次市场是否重新开盘
-                continue
+            if not self.is_market_open():
+                # 如果设置了 ENABLE_REQUESTS 环境变量，则强制继续监控（用于测试）
+                if os.getenv('ENABLE_REQUESTS') is None:
+                    logging.debug("市场已收盘，等待开盘...")
+                    time.sleep(60)  # 每分钟检查一次市场是否重新开盘
+                    continue
+                else:
+                    logging.info("非交易时间，但 ENABLE_REQUESTS 已设置，继续监控")
 
-            # 获取数据
-            data_list = self.data_fetcher.fetch_realtime_data(stock_codes)
+            try:
+                # 获取数据
+                data_list = self.data_fetcher.fetch_realtime_data(stock_codes)
 
+                # 并行处理数据更新和警报检查
+                with self.lock:
+                    self.stock_data.update_data(data_list)
 
-            # 并行处理数据更新和警报检查
-            with self.lock:
-                self.stock_data.update_data(data_list)
+                futures = []
+                for stock in stock_codes:
+                    futures.append(executor.submit(self.check_and_send_alerts, stock))
 
-            futures = []
-            for stock in stock_codes:
-                futures.append(executor.submit(self.check_and_send_alerts, stock))
+                # 等待所有检查完成
+                concurrent.futures.wait(futures)
 
-            # 等待所有检查完成
-            concurrent.futures.wait(futures)
+            except Exception as e:
+                logging.error(f"监控出错: {e}")
+
+            # 每次循环后等待一段时间，避免请求过于频繁
+            time.sleep(self.config.BASE_INTERVAL)
 
 
 

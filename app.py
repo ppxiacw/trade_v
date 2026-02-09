@@ -2,8 +2,16 @@
 交易系统后端主入口
 """
 import io
+import os
 import sys
 import threading
+
+# 禁用代理，避免代理连接问题（必须在其他模块导入前设置）
+os.environ['NO_PROXY'] = '*'
+os.environ['no_proxy'] = '*'
+for proxy_var in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
 
 import urllib3
 from flask import Flask
@@ -49,8 +57,8 @@ register_routes(app)
 
 if __name__ == "__main__" or __name__ == 'app':
     # 启动监控线程（开市时启用）
-    # monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
-    # monitor_thread.start()
+    monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
+    monitor_thread.start()
 
     # 启动Flask应用（启用多线程以支持并发请求）
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

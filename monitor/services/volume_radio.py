@@ -2,12 +2,11 @@ import logging
 
 import pandas as pd
 from datetime import datetime
-from utils.tushare_utils import IndexAnalysis, pro
+from utils.tushare_utils import IndexAnalysis
 import time
 import threading
 from functools import lru_cache
 from collections import OrderedDict
-# 假设您有Date_utils模块，包含get_date_by_step和get_today方法
 from utils.date_utils import Date_utils
 from utils.GetStockData import get_stock_name
 
@@ -43,7 +42,7 @@ volume_cache = VolumeCache()
 @lru_cache(maxsize=100)
 def get_cached_historical_volume(stock_code, date_str, time_str):
     """
-    获取缓存的历史成交量数据
+    获取缓存的历史成交量数据（使用腾讯接口）
     """
     if not str(datetime.now().date()) == Date_utils.get_today():
         time_str = "15:01:00"
@@ -53,18 +52,24 @@ def get_cached_historical_volume(stock_code, date_str, time_str):
     if cached_data is not None:
         return cached_data
 
-    # 如果没有缓存，从API获取数据
+    # 如果没有缓存，使用腾讯接口获取分钟数据
     try:
-        data = pro.stk_mins(
-            ts_code=stock_code,
-            freq='1min',
-            start_date=f"{date_str} 09:00:00",
-            end_date=f"{date_str} {time_str}"
-        )
-
-        # 计算成交量总和
-        if not data.empty:
-            volume = data['vol'].sum() / 100  # 转换为手
+        # 使用腾讯接口获取分钟数据
+        data = IndexAnalysis.rt_min(stock_code, k_type=1, num=320)
+        
+        if data is not None and not data.empty:
+            # 转换日期格式用于筛选
+            date_fmt = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            
+            # 筛选指定日期和时间范围的数据
+            mask = (data['candle_end_time'].dt.date == pd.to_datetime(date_fmt).date()) & \
+                   (data['candle_end_time'].dt.strftime('%H:%M:%S') <= time_str)
+            filtered_data = data[mask]
+            
+            if not filtered_data.empty:
+                volume = filtered_data['amount'].sum()  # 已经是手为单位
+            else:
+                volume = 0
         else:
             volume = 0
 
