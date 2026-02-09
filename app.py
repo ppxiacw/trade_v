@@ -4,7 +4,14 @@
 import io
 import os
 import sys
+import logging
 import threading
+
+# 配置日志级别
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # 禁用代理，避免代理连接问题（必须在其他模块导入前设置）
 os.environ['NO_PROXY'] = '*'

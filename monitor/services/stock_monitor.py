@@ -42,7 +42,7 @@ class StockMonitor:
             if not self.is_market_open():
                 # 如果设置了 ENABLE_REQUESTS 环境变量，则强制继续监控（用于测试）
                 if os.getenv('ENABLE_REQUESTS') is None:
-                    logging.debug("市场已收盘，等待开盘...")
+                    logging.info("市场已收盘，等待开盘...")
                     time.sleep(60)  # 每分钟检查一次市场是否重新开盘
                     continue
                 else:
