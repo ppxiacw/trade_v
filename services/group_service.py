@@ -82,13 +82,14 @@ def _ensure_group_indexes_once():
         cursor = None
         try:
             conn = get_connection()
-            cursor = conn.cursor(dictionary=True)
+            # 使用 buffered cursor，避免 SHOW INDEX 结果未完全消费导致 Unread result found
+            cursor = conn.cursor(dictionary=True, buffered=True)
 
             cursor.execute(
                 "SHOW INDEX FROM stock_groups WHERE Key_name = %s",
                 ('idx_groups_active_sort_id',),
             )
-            if not cursor.fetchone():
+            if not cursor.fetchall():
                 cursor.execute(
                     """
                     CREATE INDEX idx_groups_active_sort_id
@@ -100,7 +101,7 @@ def _ensure_group_indexes_once():
                 "SHOW INDEX FROM stock_group_items WHERE Key_name = %s",
                 ('idx_items_group_sort_id',),
             )
-            if not cursor.fetchone():
+            if not cursor.fetchall():
                 cursor.execute(
                     """
                     CREATE INDEX idx_items_group_sort_id
