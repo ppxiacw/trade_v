@@ -1,27 +1,51 @@
 """
 股票分组相关路由
 """
+import logging
+
 from flask import Blueprint, request, jsonify
 from services import group_service
 
 group_bp = Blueprint('group', __name__)
+_logger = logging.getLogger(__name__)
 
 
 @group_bp.route('/groups', methods=['GET'])
 def get_groups():
     """获取所有分组"""
     try:
-        include_stocks = request.args.get('include_stocks', 'true').lower() == 'true'
+        include_stocks_raw = request.args.get('include_stocks', 'true')
+        include_stocks = str(include_stocks_raw).lower() == 'true'
         groups = group_service.get_all_groups(include_stocks=include_stocks)
-        
+
+        # 兜底：避免服务层异常形态导致 500
+        if groups is None:
+            _logger.error('get_all_groups 返回 None，include_stocks=%s', include_stocks)
+            groups = []
+        elif not isinstance(groups, list):
+            _logger.error(
+                'get_all_groups 返回非 list，type=%s include_stocks=%s',
+                type(groups).__name__,
+                include_stocks,
+            )
+            groups = []
+
         return jsonify({
             'success': True,
             'data': groups,
             'total': len(groups)
         })
-        
+
     except Exception as e:
-        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+        _logger.exception('获取分组失败: include_stocks=%s', request.args.get('include_stocks', 'true'))
+        # 降级返回，避免前端接口 500
+        return jsonify({
+            'success': True,
+            'data': [],
+            'total': 0,
+            'degraded': True,
+            'message': f'分组服务降级返回，错误: {str(e)}',
+        }), 200
 
 
 @group_bp.route('/groups/<int:group_id>', methods=['GET'])
@@ -36,6 +60,7 @@ def get_group(group_id):
             return jsonify({'success': False, 'message': '分组不存在'}), 404
             
     except Exception as e:
+        _logger.exception('获取分组详情失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -51,6 +76,7 @@ def get_group_by_code(group_code):
             return jsonify({'success': False, 'message': '分组不存在'}), 404
             
     except Exception as e:
+        _logger.exception('根据分组代码获取分组失败: group_code=%s', group_code)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -70,6 +96,7 @@ def create_group():
             return jsonify(result), 400
             
     except Exception as e:
+        _logger.exception('创建分组失败')
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -89,6 +116,7 @@ def update_group(group_id):
             return jsonify(result), 400
             
     except Exception as e:
+        _logger.exception('更新分组失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -104,6 +132,7 @@ def delete_group(group_id):
             return jsonify(result), 400
             
     except Exception as e:
+        _logger.exception('删除分组失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -127,6 +156,7 @@ def add_stock_to_group(group_id):
             return jsonify(result), 400
             
     except Exception as e:
+        _logger.exception('添加股票到分组失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -148,6 +178,7 @@ def add_stocks_batch_to_group(group_id):
         return jsonify(result), status
 
     except Exception as e:
+        _logger.exception('批量添加股票到分组失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -163,6 +194,7 @@ def remove_stock_from_group(group_id, stock_code):
             return jsonify(result), 400
             
     except Exception as e:
+        _logger.exception('从分组移除股票失败: group_id=%s stock_code=%s', group_id, stock_code)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
@@ -181,5 +213,6 @@ def update_group_stocks(group_id):
             return jsonify(result), 400
             
     except Exception as e:
+        _logger.exception('全量更新分组股票失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
