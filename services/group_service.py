@@ -3,6 +3,9 @@
 提供分组的创建、查询、更新、删除等功能
 """
 from datetime import datetime
+import time
+from threading import Lock
+from copy import deepcopy
 from config.dbconfig import db_pool
 
 
@@ -14,58 +17,190 @@ def get_connection():
     return conn
 
 
+def _serialize_group_datetimes(group):
+    """将分组 dict 中的 datetime 转为字符串（原地修改）"""
+    for key, value in list(group.items()):
+        if isinstance(value, datetime):
+            group[key] = value.strftime('%Y-%m-%d %H:%M:%S')
+
+
+# /api/groups 查询缓存（短 TTL，降低高频查询压力）
+_GROUP_CACHE_LOCK = Lock()
+_GROUP_CACHE = {
+    True: {'expire_at': 0.0, 'data': None},   # include_stocks=True
+    False: {'expire_at': 0.0, 'data': None},  # include_stocks=False
+}
+_GROUP_CACHE_TTL_SECONDS = {
+    True: 10.0,
+    False: 15.0,
+}
+_GROUP_INDEX_INIT_LOCK = Lock()
+_GROUP_INDEX_INIT_DONE = False
+
+
+def _get_cached_groups(include_stocks):
+    now = time.time()
+    with _GROUP_CACHE_LOCK:
+        entry = _GROUP_CACHE.get(include_stocks)
+        if not entry:
+            return None
+        if entry['data'] is None or entry['expire_at'] <= now:
+            return None
+        return deepcopy(entry['data'])
+
+
+def _set_cached_groups(include_stocks, groups):
+    ttl = _GROUP_CACHE_TTL_SECONDS.get(include_stocks, 10.0)
+    with _GROUP_CACHE_LOCK:
+        _GROUP_CACHE[include_stocks] = {
+            'expire_at': time.time() + ttl,
+            'data': deepcopy(groups),
+        }
+
+
+def _invalidate_group_cache():
+    with _GROUP_CACHE_LOCK:
+        _GROUP_CACHE[True] = {'expire_at': 0.0, 'data': None}
+        _GROUP_CACHE[False] = {'expire_at': 0.0, 'data': None}
+
+
+def _ensure_group_indexes_once():
+    """
+    为 /api/groups 的核心查询补齐复合索引（仅进程内首次执行一次）：
+    - stock_groups(is_active, sort_order, id)
+    - stock_group_items(group_id, sort_order, id)
+    """
+    global _GROUP_INDEX_INIT_DONE
+    if _GROUP_INDEX_INIT_DONE:
+        return
+
+    with _GROUP_INDEX_INIT_LOCK:
+        if _GROUP_INDEX_INIT_DONE:
+            return
+
+        conn = None
+        cursor = None
+        try:
+            conn = get_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            cursor.execute(
+                "SHOW INDEX FROM stock_groups WHERE Key_name = %s",
+                ('idx_groups_active_sort_id',),
+            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    """
+                    CREATE INDEX idx_groups_active_sort_id
+                    ON stock_groups (is_active, sort_order, id)
+                    """
+                )
+
+            cursor.execute(
+                "SHOW INDEX FROM stock_group_items WHERE Key_name = %s",
+                ('idx_items_group_sort_id',),
+            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    """
+                    CREATE INDEX idx_items_group_sort_id
+                    ON stock_group_items (group_id, sort_order, id)
+                    """
+                )
+
+            _GROUP_INDEX_INIT_DONE = True
+        except Exception as e:
+            # 索引创建失败不影响业务请求，继续走原逻辑
+            print(f"分组索引检查/创建失败（可忽略）: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+
 def get_all_groups(include_stocks=True):
     """
     获取所有分组
-    
-    Args:
-        include_stocks: 是否包含分组下的股票列表
-        
-    Returns:
-        list: 分组列表
+
+    含股票列表时使用「分组表 1 次 + 明细表 1 次」查询，避免按分组 N+1 次查询。
     """
+    _ensure_group_indexes_once()
+    cached = _get_cached_groups(include_stocks)
+    if cached is not None:
+        return cached
+
     conn = None
     cursor = None
-    
+
     try:
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
-        
-        # 查询所有分组
-        sql = """
-            SELECT g.*, COUNT(i.id) as stock_count 
-            FROM stock_groups g 
-            LEFT JOIN stock_group_items i ON g.id = i.group_id 
-            WHERE g.is_active = 1 
-            GROUP BY g.id 
-            ORDER BY g.sort_order, g.id
-        """
-        cursor.execute(sql)
-        groups = cursor.fetchall()
-        
-        # 处理日期时间序列化
-        for group in groups:
-            for key, value in group.items():
-                if isinstance(value, datetime):
-                    group[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-            
-            # 如果需要包含股票列表
-            if include_stocks:
-                cursor.execute(
-                    """SELECT id, stock_code, stock_name, sort_order 
-                       FROM stock_group_items 
-                       WHERE group_id = %s 
-                       ORDER BY sort_order, id""",
-                    (group['id'],)
-                )
-                group['stocks'] = cursor.fetchall()
-        
+
+        if include_stocks:
+            cursor.execute(
+                """
+                SELECT g.*
+                FROM stock_groups g
+                WHERE g.is_active = 1
+                ORDER BY g.sort_order, g.id
+                """
+            )
+            groups = cursor.fetchall()
+            if not groups:
+                return []
+
+            group_ids = [g['id'] for g in groups]
+            placeholders = ','.join(['%s'] * len(group_ids))
+            cursor.execute(
+                f"""
+                SELECT id, group_id, stock_code, stock_name, sort_order
+                FROM stock_group_items
+                WHERE group_id IN ({placeholders})
+                ORDER BY group_id, sort_order, id
+                """,
+                tuple(group_ids),
+            )
+            items_by_group = {gid: [] for gid in group_ids}
+            for row in cursor.fetchall():
+                gid = row['group_id']
+                if gid in items_by_group:
+                    items_by_group[gid].append(
+                        {
+                            'id': row['id'],
+                            'stock_code': row['stock_code'],
+                            'stock_name': row['stock_name'],
+                            'sort_order': row['sort_order'],
+                        }
+                    )
+
+            for group in groups:
+                _serialize_group_datetimes(group)
+                stocks = items_by_group.get(group['id'], [])
+                group['stocks'] = stocks
+                group['stock_count'] = len(stocks)
+        else:
+            cursor.execute(
+                """
+                SELECT g.*, COUNT(i.id) AS stock_count
+                FROM stock_groups g
+                LEFT JOIN stock_group_items i ON g.id = i.group_id
+                WHERE g.is_active = 1
+                GROUP BY g.id
+                ORDER BY g.sort_order, g.id
+                """
+            )
+            groups = cursor.fetchall()
+            for group in groups:
+                _serialize_group_datetimes(group)
+
+        _set_cached_groups(include_stocks, groups)
         return groups
-        
+
     except Exception as e:
         print(f"查询分组失败: {e}")
         return []
-        
+
     finally:
         if cursor:
             cursor.close()
@@ -226,6 +361,7 @@ def create_group(group_data):
             )
         
         conn.commit()
+        _invalidate_group_cache()
         
         return {
             'success': True,
@@ -308,6 +444,7 @@ def update_group(group_id, group_data):
             cursor.execute(sql, params)
         
         conn.commit()
+        _invalidate_group_cache()
         
         return {'success': True, 'message': '分组更新成功'}
         
@@ -355,6 +492,7 @@ def delete_group(group_id):
         cursor.execute("DELETE FROM stock_groups WHERE id = %s", (group_id,))
         
         conn.commit()
+        _invalidate_group_cache()
         
         return {'success': True, 'message': '分组删除成功'}
         
@@ -420,6 +558,7 @@ def add_stock_to_group(group_id, stock_code, stock_name=''):
         
         item_id = cursor.lastrowid
         conn.commit()
+        _invalidate_group_cache()
         
         return {
             'success': True,
@@ -433,6 +572,90 @@ def add_stock_to_group(group_id, stock_code, stock_name=''):
         print(f"添加股票失败: {e}")
         return {'success': False, 'message': f'添加股票失败: {str(e)}'}
         
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+def add_stocks_batch_to_group(group_id, stocks):
+    """
+    批量添加股票到分组（单事务）。已存在的代码跳过，不视为失败。
+
+    Args:
+        group_id: 分组 ID
+        stocks: [{ 'stockCode'|'stock_code', 'stockName'|'stock_name' }, ...]
+
+    Returns:
+        dict: success, added, skipped, message
+    """
+    conn = None
+    cursor = None
+
+    if not stocks:
+        return {'success': False, 'message': '股票列表为空'}
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("SELECT id FROM stock_groups WHERE id = %s", (group_id,))
+        if not cursor.fetchone():
+            return {'success': False, 'message': '分组不存在'}
+
+        cursor.execute(
+            "SELECT stock_code FROM stock_group_items WHERE group_id = %s",
+            (group_id,),
+        )
+        existing = {row['stock_code'] for row in cursor.fetchall()}
+
+        cursor.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) AS m FROM stock_group_items WHERE group_id = %s",
+            (group_id,),
+        )
+        row_m = cursor.fetchone()
+        max_order = int(row_m['m'] or 0)
+
+        added = 0
+        skipped = 0
+        for item in stocks:
+            if not isinstance(item, dict):
+                skipped += 1
+                continue
+            code = (item.get('stockCode') or item.get('stock_code') or '').strip()
+            if not code:
+                skipped += 1
+                continue
+            if code in existing:
+                skipped += 1
+                continue
+            name = item.get('stockName') or item.get('stock_name') or ''
+            max_order += 1
+            cursor.execute(
+                """INSERT INTO stock_group_items (group_id, stock_code, stock_name, sort_order)
+                   VALUES (%s, %s, %s, %s)""",
+                (group_id, code, name, max_order),
+            )
+            existing.add(code)
+            added += 1
+
+        conn.commit()
+        if added > 0:
+            _invalidate_group_cache()
+        return {
+            'success': True,
+            'added': added,
+            'skipped': skipped,
+            'message': f'新增 {added} 只，跳过 {skipped} 只（已在分组或代码无效）',
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f'批量添加股票失败: {e}')
+        return {'success': False, 'message': f'批量添加失败: {str(e)}'}
+
     finally:
         if cursor:
             cursor.close()
@@ -467,6 +690,7 @@ def remove_stock_from_group(group_id, stock_code):
             return {'success': False, 'message': '股票不在该分组中'}
         
         conn.commit()
+        _invalidate_group_cache()
         
         return {'success': True, 'message': '股票移除成功'}
         
@@ -518,6 +742,7 @@ def update_group_stocks(group_id, stocks):
             )
         
         conn.commit()
+        _invalidate_group_cache()
         
         return {
             'success': True,

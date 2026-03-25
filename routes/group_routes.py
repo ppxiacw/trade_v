@@ -130,6 +130,27 @@ def add_stock_to_group(group_id):
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
 
+@group_bp.route('/groups/<int:group_id>/stocks/batch', methods=['POST'])
+def add_stocks_batch_to_group(group_id):
+    """批量添加股票到分组（单次事务）"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'message': '请求数据为空'}), 400
+        stocks = data.get('stocks')
+        if not isinstance(stocks, list):
+            return jsonify({'success': False, 'message': 'stocks 须为数组'}), 400
+        if len(stocks) > 8000:
+            return jsonify({'success': False, 'message': '单次最多 8000 只股票'}), 400
+
+        result = group_service.add_stocks_batch_to_group(group_id, stocks)
+        status = 200 if result.get('success') else 400
+        return jsonify(result), status
+
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+
+
 @group_bp.route('/groups/<int:group_id>/stocks/<string:stock_code>', methods=['DELETE'])
 def remove_stock_from_group(group_id, stock_code):
     """从分组中移除股票"""
