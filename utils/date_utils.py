@@ -1,6 +1,11 @@
 from datetime import datetime
 import pandas as pd
-import adata
+import akshare as ak
+
+try:
+    import adata  # 部分环境不可用，保留兼容
+except Exception:
+    adata = None
 
 
 class Date_utils:
@@ -14,7 +19,30 @@ class Date_utils:
         year_str = str(year)
 
         if year_str not in Date_utils.calendar_cache:
-            Date_utils.calendar_cache[year_str] = adata.stock.info.trade_calendar(year_str)
+            if adata is not None:
+                Date_utils.calendar_cache[year_str] = adata.stock.info.trade_calendar(year_str)
+            else:
+                # adata 不可用时使用 akshare 交易日序列构造兼容日历
+                trade_days_df = ak.tool_trade_date_hist_sina()
+                if trade_days_df is None or trade_days_df.empty:
+                    raise RuntimeError('无法获取交易日历（akshare 返回空）')
+
+                trade_days = pd.to_datetime(trade_days_df.iloc[:, 0], errors='coerce').dropna()
+                trade_days = trade_days[trade_days.dt.year == int(year_str)]
+                trade_set = set(trade_days.dt.strftime('%Y-%m-%d').tolist())
+
+                date_range = pd.date_range(
+                    start=f'{year_str}-01-01',
+                    end=f'{year_str}-12-31',
+                    freq='D',
+                )
+                calendar_df = pd.DataFrame({
+                    'trade_date': date_range.strftime('%Y-%m-%d'),
+                })
+                calendar_df['trade_status'] = calendar_df['trade_date'].apply(
+                    lambda d: '1' if d in trade_set else '0',
+                )
+                Date_utils.calendar_cache[year_str] = calendar_df
         return Date_utils.calendar_cache[year_str]
 
     @staticmethod

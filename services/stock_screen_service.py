@@ -14,6 +14,7 @@ from typing import Any, List, Optional, Tuple
 
 import requests
 
+from config.dbconfig import exeQuery
 from utils.common import format_stock_code
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,43 @@ def _is_star_market_board(ts_code: str) -> bool:
     return num.zfill(6).startswith("688")
 
 
+def _prefix_to_ts_code(stock_code: str) -> Optional[str]:
+    """
+    sh600519/sz000001/600519 -> 600519.SH / 000001.SZ
+    """
+    if not stock_code:
+        return None
+    code = str(stock_code).strip().lower()
+    if len(code) >= 8 and code[:2] in ("sh", "sz", "bj") and code[2:].isdigit():
+        num = code[2:].zfill(6)
+        return f"{num}.{code[:2].upper()}"
+    if code.isdigit():
+        num = code.zfill(6)
+        if num.startswith("6"):
+            return f"{num}.SH"
+        return f"{num}.SZ"
+    return None
+
+
+def _load_universe_from_db() -> List[Tuple[str, str, str]]:
+    rows: List[Tuple[str, str, str]] = []
+    try:
+        records = exeQuery("SELECT stock_code, stock_name FROM stocks")
+        if not records:
+            return rows
+        for item in records:
+            ts_code = _prefix_to_ts_code(item.get("stock_code"))
+            if not ts_code or _is_star_market_board(ts_code):
+                continue
+            sym = ts_to_gtimg_symbol(ts_code)
+            if not sym:
+                continue
+            rows.append((sym, ts_code, (item.get("stock_name") or "").strip()))
+    except Exception as e:
+        logger.warning("从数据库加载股票池失败: %s", e)
+    return rows
+
+
 def _load_universe() -> List[Tuple[str, str, str]]:
     """
     (gtimg_symbol, ts_code, name_from_list)
@@ -89,15 +127,19 @@ def _load_universe() -> List[Tuple[str, str, str]]:
     try:
         from utils import GetStockData
 
-        for ts_code, info in GetStockData.result.items():
+        result_map = getattr(GetStockData, "result", {}) or {}
+        for ts_code, info in result_map.items():
             if _is_star_market_board(ts_code):
                 continue
             sym = ts_to_gtimg_symbol(ts_code)
             if sym:
                 rows.append((sym, ts_code, (info or {}).get("name") or ""))
+        if rows:
+            return rows
+        logger.warning("GetStockData.result 为空，尝试回退到数据库 stocks 表")
     except Exception as e:
         logger.warning("加载全市场代码表失败: %s", e)
-    return rows
+    return _load_universe_from_db()
 
 
 def _parse_gtimg_response(text: str) -> List[dict]:
