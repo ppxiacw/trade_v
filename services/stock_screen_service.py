@@ -119,6 +119,46 @@ def _load_universe_from_db() -> List[Tuple[str, str, str]]:
     return rows
 
 
+def _load_universe_from_eastmoney() -> List[Tuple[str, str, str]]:
+    """
+    通过东方财富公开接口拉取A股代码池（不依赖 akshare）。
+    返回: [(gtimg_symbol, ts_code, name), ...]
+    """
+    rows: List[Tuple[str, str, str]] = []
+    try:
+        # 覆盖沪深主板/中小板/创业板/科创板等A股市场
+        fs = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+        url = (
+            "https://80.push2.eastmoney.com/api/qt/clist/get"
+            "?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f3"
+            f"&fs={fs}&fields=f12,f14"
+        )
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        diff = (((data or {}).get("data") or {}).get("diff")) or []
+        if not isinstance(diff, list):
+            return rows
+
+        for item in diff:
+            code = str((item or {}).get("f12") or "").strip()
+            name = str((item or {}).get("f14") or "").strip()
+            if not code.isdigit() or len(code) > 6:
+                continue
+            code = code.zfill(6)
+            market = "SH" if code.startswith("6") else "SZ"
+            ts_code = f"{code}.{market}"
+            if _is_star_market_board(ts_code):
+                continue
+            sym = ts_to_gtimg_symbol(ts_code)
+            if not sym:
+                continue
+            rows.append((sym, ts_code, name))
+    except Exception as e:
+        logger.warning("从东方财富接口加载股票池失败: %s", e)
+    return rows
+
+
 def _load_universe() -> List[Tuple[str, str, str]]:
     """
     (gtimg_symbol, ts_code, name_from_list)
@@ -139,7 +179,16 @@ def _load_universe() -> List[Tuple[str, str, str]]:
         logger.warning("GetStockData.result 为空，尝试回退到数据库 stocks 表")
     except Exception as e:
         logger.warning("加载全市场代码表失败: %s", e)
-    return _load_universe_from_db()
+
+    db_rows = _load_universe_from_db()
+    if db_rows:
+        return db_rows
+
+    em_rows = _load_universe_from_eastmoney()
+    if em_rows:
+        return em_rows
+
+    return []
 
 
 def _parse_gtimg_response(text: str) -> List[dict]:
@@ -209,8 +258,8 @@ def screen_stocks_by_mv_and_pct(
     universe = _load_universe()
     if not universe:
         raise RuntimeError(
-            "本地股票代码表为空（utils/GetStockData 初始化失败）。"
-            "请确认本机能访问 akshare 的 stock_info_a_code_name 或检查启动日志。"
+            "股票代码池为空（GetStockData/数据库stocks/东方财富接口均不可用）。"
+            "请检查服务网络、数据库连接与启动日志。"
         )
 
     sym_to_meta = {u[0]: (u[1], u[2]) for u in universe}
