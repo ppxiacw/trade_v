@@ -5,4 +5,7 @@ __pycache__/
 *.pyc
 **/*.pyc
 *.pyo
- 
+.venv/
+venv/
+env/
+ENV/

@@ -1,12 +1,147 @@
 """
 监控相关路由
 """
+import threading
+import re
+import time
+from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request
 from utils.tushare_utils import IndexAnalysis
 from monitor.services.volume_radio import get_volume_ratio_simple
 from monitor.config.db_monitor import db_manager, stock_alert_dao
+from monitor.config.stock_code import normalize_monitor_stock_code
 
 monitor_bp = Blueprint('monitor', __name__)
+_monitor_columns_lock = threading.Lock()
+_monitor_columns_ready = False
+_route_cache_lock = threading.Lock()
+_route_cache = {}
+
+_CACHE_TTL_STOCKS = 15
+_CACHE_TTL_ALERTS = 8
+_CACHE_TTL_STATS = 12
+
+
+def _cache_get(cache_key):
+    now = time.time()
+    with _route_cache_lock:
+        cached = _route_cache.get(cache_key)
+        if not cached:
+            return None
+        if cached['expires_at'] <= now:
+            _route_cache.pop(cache_key, None)
+            return None
+        return cached['value']
+
+
+def _cache_set(cache_key, value, ttl_seconds):
+    with _route_cache_lock:
+        _route_cache[cache_key] = {
+            'value': value,
+            'expires_at': time.time() + max(1, int(ttl_seconds))
+        }
+
+
+def _invalidate_monitor_cache():
+    with _route_cache_lock:
+        keys = list(_route_cache.keys())
+        for key in keys:
+            if key.startswith("monitor:stocks") or key.startswith("monitor:alerts") or key.startswith("monitor:stats"):
+                _route_cache.pop(key, None)
+
+
+def _build_stock_code_aliases(stock_code, stock_name=""):
+    code = str(stock_code or "").strip()
+    aliases = set()
+    if not code:
+        return aliases
+
+    aliases.add(code)
+    aliases.add(code.lower())
+    aliases.add(code.upper())
+
+    normalized = normalize_monitor_stock_code(code, stock_name)
+    if normalized:
+        aliases.add(normalized)
+        aliases.add(normalized.lower())
+        aliases.add(normalized.upper())
+
+        pure = normalized.split('.')[0] if '.' in normalized else normalized
+        exchange = normalized.split('.')[-1].upper() if '.' in normalized else ''
+        if pure.isdigit() and exchange in ('SH', 'SZ'):
+            aliases.add(pure)
+            aliases.add(f"{exchange.lower()}{pure}")
+            aliases.add(f"{pure}.{exchange}")
+            aliases.add(f"{pure}.{exchange.lower()}")
+            aliases.add(f"{pure}.{'SH' if exchange == 'SZ' else 'SZ'}")
+            aliases.add(f"{'sh' if exchange == 'SZ' else 'sz'}{pure}")
+
+    pure_match = re.fullmatch(r"([0-9]{1,6})", code)
+    if pure_match:
+        pure = pure_match.group(1).zfill(6)
+        aliases.update({
+            pure,
+            f"sh{pure}",
+            f"sz{pure}",
+            f"{pure}.SH",
+            f"{pure}.SZ",
+            f"{pure}.sh",
+            f"{pure}.sz",
+        })
+
+    return {a for a in aliases if a}
+
+
+def _find_stock_row_by_aliases(stock_code, stock_name=""):
+    aliases = list(_build_stock_code_aliases(stock_code, stock_name))
+    if not aliases:
+        return None
+    placeholders = ", ".join(["%s"] * len(aliases))
+    rows = db_manager.execute_query(
+        f"SELECT id, stock_code, stock_name FROM stocks WHERE stock_code IN ({placeholders}) LIMIT 1",
+        tuple(aliases)
+    )
+    return rows[0] if rows else None
+
+
+def _ensure_monitor_stock_columns_once():
+    """
+    确保监控股票表包含告警价格区间字段（幂等）。
+    """
+    global _monitor_columns_ready
+    if _monitor_columns_ready:
+        return
+
+    with _monitor_columns_lock:
+        if _monitor_columns_ready:
+            return
+        conn = None
+        cursor = None
+        try:
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SHOW COLUMNS FROM stocks LIKE 'trigger_min_price'")
+                has_min = cursor.fetchone() is not None
+                cursor.fetchall()
+                cursor.execute("SHOW COLUMNS FROM stocks LIKE 'trigger_max_price'")
+                has_max = cursor.fetchone() is not None
+                cursor.fetchall()
+
+                if not has_min:
+                    cursor.execute(
+                        "ALTER TABLE stocks ADD COLUMN trigger_min_price DECIMAL(12,4) NULL COMMENT '告警触发最小价格'"
+                    )
+                if not has_max:
+                    cursor.execute(
+                        "ALTER TABLE stocks ADD COLUMN trigger_max_price DECIMAL(12,4) NULL COMMENT '告警触发最大价格'"
+                    )
+            _monitor_columns_ready = True
+        except Exception:
+            # 字段补齐失败不阻断接口（旧环境继续可用）
+            pass
+        finally:
+            if cursor:
+                cursor.close()
 
 
 @monitor_bp.route('/rt_min')
@@ -27,7 +162,7 @@ def volume_ratio(stock_codes=None):
     if stock_codes is None:
         stock_codes = list(config.CONFIG_LIST.keys())
     else:
-        stock_codes = stock_codes.split(',')
+        stock_codes = [normalize_monitor_stock_code(code) for code in stock_codes.split(',')]
 
     return get_volume_ratio_simple(stock_codes)
 
@@ -41,7 +176,7 @@ def calculate_ma_distances(stock_codes=None):
     if stock_codes is None:
         stock_codes = list(config.CONFIG_LIST.keys())
     else:
-        stock_codes = stock_codes.split(',')
+        stock_codes = [normalize_monitor_stock_code(code) for code in stock_codes.split(',')]
     
     v = alert_checker.calculate_ma_distances(stock_codes)
     return v
@@ -53,6 +188,12 @@ def calculate_ma_distances(stock_codes=None):
 def get_monitor_stocks():
     """获取监控中的股票列表"""
     try:
+        cache_key = "monitor:stocks:list"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
+        _ensure_monitor_stock_columns_once()
         # 只查询监控中的股票
         query = "SELECT * FROM stocks WHERE is_monitor = 1 ORDER BY stock_code ASC"
         stocks = db_manager.execute_query(query)
@@ -60,6 +201,16 @@ def get_monitor_stocks():
         # 为每个股票添加默认的配置字段（如果不存在）
         import json
         for stock in stocks:
+            normalized_code = normalize_monitor_stock_code(stock.get('stock_code'), stock.get('stock_name'))
+            if stock.get('id') and normalized_code and normalized_code != stock.get('stock_code'):
+                db_manager.execute_update(
+                    'stocks',
+                    {'stock_code': normalized_code},
+                    'id = %s',
+                    (stock['id'],)
+                )
+            stock['stock_code'] = normalized_code or stock.get('stock_code')
+
             # 解析JSON字段（如果存在）
             if 'price_thresholds' in stock and stock.get('price_thresholds'):
                 try:
@@ -92,12 +243,18 @@ def get_monitor_stocks():
                 stock['normal_movement'] = 0
             if 'break_ma' not in stock:
                 stock['break_ma'] = 0
+
+            # 价格区间触发（为空表示不限制）
+            stock['trigger_min_price'] = stock.get('trigger_min_price')
+            stock['trigger_max_price'] = stock.get('trigger_max_price')
         
-        return jsonify({
+        payload = {
             'success': True,
             'data': stocks,
             'total': len(stocks)
-        })
+        }
+        _cache_set(cache_key, payload, _CACHE_TTL_STOCKS)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -106,27 +263,31 @@ def get_monitor_stocks():
 def add_monitor_stock():
     """添加监控股票"""
     try:
-        data = request.get_json()
-        stock_code = data.get('stock_code')
+        _ensure_monitor_stock_columns_once()
+        data = request.get_json() or {}
+        raw_stock_code = data.get('stock_code')
         stock_name = data.get('stock_name', '')
+        stock_code = normalize_monitor_stock_code(raw_stock_code, stock_name)
         
         if not stock_code:
             return jsonify({'success': False, 'message': '股票代码不能为空'}), 400
         
         # 检查是否已存在
-        existing = db_manager.execute_query(
-            "SELECT id FROM stocks WHERE stock_code = %s", 
-            (stock_code,)
-        )
+        existing = _find_stock_row_by_aliases(raw_stock_code, stock_name)
         
         if existing:
             # 更新为监控状态
             db_manager.execute_update(
                 'stocks',
-                {'is_monitor': 1},
-                'stock_code = %s',
-                (stock_code,)
+                {
+                    'is_monitor': 1,
+                    'stock_code': stock_code,
+                    'stock_name': stock_name or existing.get('stock_name', '')
+                },
+                'id = %s',
+                (existing['id'],)
             )
+            _invalidate_monitor_cache()
             return jsonify({'success': True, 'message': '已启用监控'})
         
         # 新增股票 - 只使用基本字段
@@ -135,8 +296,13 @@ def add_monitor_stock():
             'stock_name': stock_name,
             'is_monitor': 1
         }
+        if 'trigger_min_price' in data:
+            insert_data['trigger_min_price'] = data.get('trigger_min_price')
+        if 'trigger_max_price' in data:
+            insert_data['trigger_max_price'] = data.get('trigger_max_price')
         
         stock_id = db_manager.execute_insert('stocks', insert_data)
+        _invalidate_monitor_cache()
         
         return jsonify({
             'success': True, 
@@ -151,7 +317,12 @@ def add_monitor_stock():
 def update_monitor_stock(stock_code):
     """更新监控股票配置"""
     try:
-        data = request.get_json()
+        _ensure_monitor_stock_columns_once()
+        data = request.get_json() or {}
+        row = _find_stock_row_by_aliases(stock_code, data.get('stock_name', ''))
+        if not row:
+            return jsonify({'success': False, 'message': '股票不存在'}), 404
+        normalized_code = normalize_monitor_stock_code(stock_code, data.get('stock_name', row.get('stock_name', '')))
         
         update_data = {}
         
@@ -160,6 +331,15 @@ def update_monitor_stock(stock_code):
             update_data['is_monitor'] = 1 if data['is_monitor'] else 0
         if 'stock_name' in data:
             update_data['stock_name'] = data['stock_name']
+        update_data['stock_code'] = normalized_code
+        if 'common' in data:
+            update_data['common'] = 1 if data['common'] else 0
+        if 'normal_movement' in data:
+            update_data['normal_movement'] = 1 if data['normal_movement'] else 0
+        if 'trigger_min_price' in data:
+            update_data['trigger_min_price'] = data.get('trigger_min_price')
+        if 'trigger_max_price' in data:
+            update_data['trigger_max_price'] = data.get('trigger_max_price')
         
         if not update_data:
             return jsonify({'success': False, 'message': '没有需要更新的数据'}), 400
@@ -167,9 +347,10 @@ def update_monitor_stock(stock_code):
         affected = db_manager.execute_update(
             'stocks',
             update_data,
-            'stock_code = %s',
-            (stock_code,)
+            'id = %s',
+            (row['id'],)
         )
+        _invalidate_monitor_cache()
         
         return jsonify({
             'success': True,
@@ -184,12 +365,16 @@ def update_monitor_stock(stock_code):
 def remove_monitor_stock(stock_code):
     """移除监控股票（设置is_monitor为0）"""
     try:
+        row = _find_stock_row_by_aliases(stock_code)
+        if not row:
+            return jsonify({'success': False, 'message': '股票不存在'}), 404
         affected = db_manager.execute_update(
             'stocks',
             {'is_monitor': 0},
-            'stock_code = %s',
-            (stock_code,)
+            'id = %s',
+            (row['id'],)
         )
+        _invalidate_monitor_cache()
         
         return jsonify({
             'success': True,
@@ -219,6 +404,7 @@ def get_alert_history():
         params = []
         
         if stock_code:
+            stock_code = normalize_monitor_stock_code(stock_code)
             conditions.append("stock_code = %s")
             params.append(stock_code)
         if alert_type:
@@ -230,6 +416,14 @@ def get_alert_history():
         if end_time:
             conditions.append("trigger_time <= %s")
             params.append(end_time)
+
+        cache_key = (
+            f"monitor:alerts:{stock_code or ''}:{alert_type or ''}:"
+            f"{start_time or ''}:{end_time or ''}:{limit}:{offset}"
+        )
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
         
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
@@ -251,13 +445,15 @@ def get_alert_history():
         
         alerts = db_manager.execute_query(query, tuple(params))
         
-        return jsonify({
+        payload = {
             'success': True,
             'data': alerts,
             'total': total,
             'limit': limit,
             'offset': offset
-        })
+        }
+        _cache_set(cache_key, payload, _CACHE_TTL_ALERTS)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -266,43 +462,54 @@ def get_alert_history():
 def get_alert_stats():
     """获取告警统计信息"""
     try:
+        cache_key = "monitor:stats:today"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
+        time_range_params = (today_start, today_end)
+
         # 今日告警数量
         today_query = """
             SELECT COUNT(*) as count FROM stock_alert_log 
-            WHERE DATE(trigger_time) = CURDATE()
+            WHERE trigger_time >= %s AND trigger_time < %s
         """
-        today_result = db_manager.execute_query(today_query)
+        today_result = db_manager.execute_query(today_query, time_range_params)
         today_count = today_result[0]['count'] if today_result else 0
         
         # 按股票分组统计
         stock_query = """
             SELECT stock_code, stock_name, COUNT(*) as count 
             FROM stock_alert_log 
-            WHERE DATE(trigger_time) = CURDATE()
+            WHERE trigger_time >= %s AND trigger_time < %s
             GROUP BY stock_code, stock_name
             ORDER BY count DESC
             LIMIT 10
         """
-        stock_stats = db_manager.execute_query(stock_query)
+        stock_stats = db_manager.execute_query(stock_query, time_range_params)
         
         # 按告警类型分组统计
         type_query = """
             SELECT alert_type, COUNT(*) as count 
             FROM stock_alert_log 
-            WHERE DATE(trigger_time) = CURDATE()
+            WHERE trigger_time >= %s AND trigger_time < %s
             GROUP BY alert_type
             ORDER BY count DESC
         """
-        type_stats = db_manager.execute_query(type_query)
+        type_stats = db_manager.execute_query(type_query, time_range_params)
         
-        return jsonify({
+        payload = {
             'success': True,
             'data': {
                 'today_count': today_count,
                 'stock_stats': stock_stats,
                 'type_stats': type_stats
             }
-        })
+        }
+        _cache_set(cache_key, payload, _CACHE_TTL_STATS)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -313,6 +520,7 @@ def reload_monitor_config():
     try:
         from app import config
         config.reload_config()
+        _invalidate_monitor_cache()
         
         return jsonify({
             'success': True,

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from utils.send_dingding import send_dingtalk_message
 from utils.GetStockData import get_stock_name
 from monitor.config.db_monitor import stock_alert_dao
@@ -13,6 +13,8 @@ class AlertSender:
             self.last_alert_time[stock] = {}
 
     def send_alert(self, stock, alerts_with_cooldown):
+        if not self._is_alert_time_allowed():
+            return
         current_time = datetime.now()
         valid_alerts = []
 
@@ -58,4 +60,19 @@ class AlertSender:
 
             # 插入数据库 - 直接使用alert_data
             stock_alert_dao.insert_alert(alert_data)
+
+    def _is_alert_time_allowed(self):
+        """
+        仅在连续竞价时段触发并入库：
+        - 上午: 09:30 <= t < 11:30
+        - 下午: 13:00 <= t < 15:00
+        收盘时刻与休市时间不触发。
+        """
+        now = datetime.now()
+        if now.weekday() >= 5:
+            return False
+        t = now.time()
+        morning = dt_time(9, 30) <= t < dt_time(11, 30)
+        afternoon = dt_time(13, 0) <= t < dt_time(15, 0)
+        return morning or afternoon
 

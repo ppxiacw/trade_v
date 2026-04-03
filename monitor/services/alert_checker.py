@@ -13,13 +13,22 @@ class AlertChecker:
 
     def check_all_conditions(self, stock):
         alerts = []
+        candles = self.stock_data.get_stock_data(stock)
+        if not candles:
+            return alerts
+        current_price = candles[-1].get('close')
+        if current_price is None:
+            return alerts
+
+        if not self._is_price_in_trigger_range(stock, current_price):
+            return alerts
 
         # 检查固定价格阈值条件
-        price_threshold_alerts = self._check_price_thresholds(stock)
+        price_threshold_alerts = self._check_price_thresholds(stock, candles)
         alerts.extend(price_threshold_alerts)
 
         # 检查涨跌幅百分比阈值条件
-        change_threshold_alerts = self._check_change_thresholds(stock)
+        change_threshold_alerts = self._check_change_thresholds(stock, candles)
         alerts.extend(change_threshold_alerts)
 
         # ma_alerts = self._check_ma_breakdown(stock)
@@ -37,6 +46,26 @@ class AlertChecker:
                 alerts.extend(common_alerts)
 
         return alerts
+
+    def _is_price_in_trigger_range(self, stock, current_price):
+        cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        min_price = cfg.get('trigger_min_price')
+        max_price = cfg.get('trigger_max_price')
+
+        try:
+            min_price = float(min_price) if min_price is not None else None
+        except (TypeError, ValueError):
+            min_price = None
+        try:
+            max_price = float(max_price) if max_price is not None else None
+        except (TypeError, ValueError):
+            max_price = None
+
+        if min_price is not None and current_price < min_price:
+            return False
+        if max_price is not None and current_price > max_price:
+            return False
+        return True
 
     def _check_time_window_conditions(self, stock, window_sec):
         triggered_conditions = []
@@ -96,11 +125,10 @@ class AlertChecker:
 
         return alerts
 
-    def _check_price_thresholds(self, stock):
-        candles = self.stock_data.get_stock_data(stock)
+    def _check_price_thresholds(self, stock, candles=None):
+        candles = candles or self.stock_data.get_stock_data(stock)
         if not candles:
             return []
-
         current_price = candles[-1]['close']
         price_thresholds = self.config.MONITOR_STOCKS[stock].get("price_thresholds", [])
         alerts = []
@@ -148,12 +176,12 @@ class AlertChecker:
 
         return triggered_alerts
 
-    def _check_change_thresholds(self, stock):
+    def _check_change_thresholds(self, stock, candles=None):
         change_thresholds = self.config.MONITOR_STOCKS[stock].get("change_thresholds", [])
         if not change_thresholds:
             return []
 
-        candles = self.stock_data.get_stock_data(stock)
+        candles = candles or self.stock_data.get_stock_data(stock)
         if not candles:
             return []
 
