@@ -12,7 +12,7 @@ import threading
 import time
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import akshare as ak
@@ -33,6 +33,8 @@ _REQUEST_GAP_SECONDS = 0.12
 _SECOND_PASS_RETRY_ENABLED = True
 _PROXY_ENV_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 _TENCENT_KLINE_COUNT = 1500
+_RETENTION_START_YYYYMMDD = "20240501"
+_RETENTION_START_DATE = date(2024, 5, 1)
 
 _status_lock = threading.Lock()
 _sync_lock = threading.Lock()
@@ -66,7 +68,21 @@ def _disable_proxy_env() -> None:
 
 def _default_full_start_date() -> str:
     # 默认仅导入近3年历史数据
-    return (datetime.now() - timedelta(days=365 * 3)).strftime("%Y%m%d")
+    candidate = (datetime.now() - timedelta(days=365 * 3)).date()
+    return max(candidate, _RETENTION_START_DATE).strftime("%Y%m%d")
+
+
+def _clamp_start_date(start_date: Optional[str]) -> str:
+    """
+    将开始日期限制在保留窗口内（不早于 2024-05-01）。
+    """
+    if not start_date:
+        return _RETENTION_START_YYYYMMDD
+    raw = str(start_date).strip()
+    if not raw:
+        return _RETENTION_START_YYYYMMDD
+    dt = datetime.strptime(raw, "%Y%m%d").date()
+    return max(dt, _RETENTION_START_DATE).strftime("%Y%m%d")
 
 
 def _normalize_ts_code(raw_code: str) -> Optional[str]:
@@ -552,8 +568,12 @@ def _load_latest_trade_date_map() -> Dict[str, datetime.date]:
 
 def _next_start_date(latest_date) -> str:
     if not latest_date:
-        return "19900101"
-    return (latest_date + timedelta(days=1)).strftime("%Y%m%d")
+        return _RETENTION_START_YYYYMMDD
+    return max(latest_date + timedelta(days=1), _RETENTION_START_DATE).strftime("%Y%m%d")
+
+
+def _cleanup_outdated_rows() -> int:
+    return db_manager.execute_delete(_TABLE_NAME, f"trade_date < '{_RETENTION_START_DATE.isoformat()}'")
 
 
 def _run_sync(mode: str, trigger: str, full_start_date: Optional[str] = None) -> None:
@@ -574,6 +594,9 @@ def _run_sync(mode: str, trigger: str, full_start_date: Optional[str] = None) ->
         )
         try:
             _ensure_table_once()
+            deleted_rows = _cleanup_outdated_rows()
+            if deleted_rows > 0:
+                logger.info("已清理 %s 条过期日K（早于 %s）", deleted_rows, _RETENTION_START_DATE.isoformat())
             universe = _get_stock_universe()
             _set_status(total_stocks=len(universe))
 
@@ -582,7 +605,7 @@ def _run_sync(mode: str, trigger: str, full_start_date: Optional[str] = None) ->
             for idx, (ts_code, stock_name) in enumerate(universe, start=1):
                 _set_status(processed_stocks=idx, current_stock=f"{ts_code} {stock_name}")
                 if mode == "full":
-                    start_date = full_start_date or "19900101"
+                    start_date = _clamp_start_date(full_start_date)
                 else:
                     start_date = _next_start_date(latest_map.get(ts_code))
 
@@ -648,7 +671,7 @@ def start_daily_kline_full_sync(trigger: str = "manual", start_date: Optional[st
     return _start_background_sync(
         mode="full",
         trigger=trigger,
-        full_start_date=start_date or _default_full_start_date(),
+        full_start_date=_clamp_start_date(start_date or _default_full_start_date()),
     )
 
 
