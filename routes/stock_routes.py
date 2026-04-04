@@ -7,6 +7,11 @@ from flask import Blueprint, jsonify, request
 from config.dbconfig import exeQuery
 from utils.common import format_stock_code
 from services.stock_screen_service import screen_stocks_by_mv_and_pct
+from services.daily_kline_sync_service import (
+    start_daily_kline_full_sync,
+    start_daily_kline_incremental_sync,
+    get_daily_kline_sync_status,
+)
 
 stock_bp = Blueprint('stock', __name__)
 _logger = logging.getLogger(__name__)
@@ -77,4 +82,46 @@ def reload_config():
     config.reload_config()
     stock_data.initialize_data_storage()
     return jsonify({'success': True, 'message': '配置重载成功'})
+
+
+@stock_bp.route('/daily_kline/sync_full', methods=['POST'])
+def sync_daily_kline_full():
+    """
+    启动全量历史日K入库任务（后台异步执行）。
+    可选参数：start_date=YYYYMMDD，默认近3年
+    """
+    payload = request.get_json(silent=True) or {}
+    start_date = payload.get('start_date')
+    accepted, message = start_daily_kline_full_sync(trigger='manual', start_date=start_date)
+    status = get_daily_kline_sync_status()
+    return jsonify({
+        'success': accepted,
+        'message': message,
+        'status': status,
+    }), (202 if accepted else 409)
+
+
+@stock_bp.route('/daily_kline/sync_incremental', methods=['POST'])
+def sync_daily_kline_incremental():
+    """
+    启动增量日K补齐任务（后台异步执行）。
+    """
+    accepted, message = start_daily_kline_incremental_sync(trigger='manual')
+    status = get_daily_kline_sync_status()
+    return jsonify({
+        'success': accepted,
+        'message': message,
+        'status': status,
+    }), (202 if accepted else 409)
+
+
+@stock_bp.route('/daily_kline/sync_status', methods=['GET'])
+def sync_daily_kline_status():
+    """
+    查询日K同步任务状态。
+    """
+    return jsonify({
+        'success': True,
+        'status': get_daily_kline_sync_status(),
+    })
 

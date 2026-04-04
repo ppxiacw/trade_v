@@ -38,6 +38,7 @@ from monitor.services.data_fetcher import DataFetcher
 from monitor.services.alert_checker import AlertChecker
 from monitor.services.alert_sender import AlertSender
 from monitor.services.stock_monitor import StockMonitor
+from services.daily_kline_sync_service import start_daily_kline_scheduler
 
 # ==================== 应用初始化1 ====================
 
@@ -66,6 +67,9 @@ if __name__ == "__main__" or __name__ == 'app':
     # 启动监控线程（开市时启用）
     monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
     monitor_thread.start()
+
+    # 启动日K增量补齐定时任务（交易日 15:35）
+    start_daily_kline_scheduler()
 
     # 启动Flask应用（启用多线程以支持并发请求）
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
