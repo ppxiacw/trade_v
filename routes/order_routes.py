@@ -32,7 +32,12 @@ def get_orders():
     try:
         status = request.args.get('status')
         stock_code = request.args.get('stock_code')
-        limit = int(request.args.get('limit', 50))
+        try:
+            limit = int(request.args.get('limit', 50))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': 'limit 必须是整数'}), 400
+        if limit < 1 or limit > 500:
+            return jsonify({'success': False, 'message': 'limit 需在 1~500 之间'}), 400
         
         orders = order_service.get_orders(status=status, stock_code=stock_code, limit=limit)
         

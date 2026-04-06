@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 def get_stock_list():
     """获取股票列表"""
     stocks = "select * from stocks order by id desc"
-    result = exeQuery(stocks)
+    result = exeQuery(stocks) or []
 
     for stock in result:
         stock['stock_code'] = format_stock_code(stock['stock_code'], 'prefix')
