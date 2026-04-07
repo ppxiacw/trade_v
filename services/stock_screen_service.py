@@ -9,8 +9,9 @@ import math
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -26,6 +27,10 @@ _GTIMG_HEADERS = {
     ),
     "Referer": "https://finance.qq.com/",
 }
+_EM_HEADERS = {
+    "User-Agent": _GTIMG_HEADERS["User-Agent"],
+    "Referer": "https://quote.eastmoney.com/",
+}
 
 # 经样本校验：腾讯 v_sh600519 波浪线分段，下标从 0 起
 # 31: 涨跌额, 32: 涨跌幅(%), 44: 总市值(亿元)
@@ -33,8 +38,23 @@ _IDX_NAME = 1
 _IDX_PRICE = 3
 _IDX_CHG_AMT = 31
 _IDX_PCT = 32
+_IDX_TURNOVER_RATE = 38
 _IDX_TOTAL_MV_YI = 44
 _IDX_FLOAT_MV_YI = 45
+
+_EM_PROFILE_CACHE: Dict[str, Any] = {
+    "expire_at": 0.0,
+    "data": {},
+}
+_EM_PROFILE_CACHE_TTL_SECONDS = 20 * 60
+_THS_HEADERS = {
+    "User-Agent": _GTIMG_HEADERS["User-Agent"],
+    "Referer": "https://basic.10jqka.com.cn/",
+}
+_THS_PROFILE_CACHE: Dict[str, Dict[str, Any]] = {}
+_THS_PROFILE_ITEM_TTL_SECONDS = 6 * 60 * 60
+_THS_PROFILE_FALLBACK_FETCH_CAP = 160
+_THS_CONCEPT_MAX_ITEMS = 8
 
 
 def _disable_proxy_for_requests() -> None:
@@ -127,20 +147,8 @@ def _load_universe_from_eastmoney() -> List[Tuple[str, str, str]]:
     rows: List[Tuple[str, str, str]] = []
     try:
         # 覆盖沪深主板/中小板/创业板/科创板等A股市场
-        fs = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
-        url = (
-            "https://80.push2.eastmoney.com/api/qt/clist/get"
-            "?pn=1&pz=6000&po=1&np=1&fltt=2&invt=2&fid=f3"
-            f"&fs={fs}&fields=f12,f14"
-        )
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        diff = (((data or {}).get("data") or {}).get("diff")) or []
-        if not isinstance(diff, list):
-            return rows
-
-        for item in diff:
+        records = _load_eastmoney_clist_rows(fields="f12,f14")
+        for item in records:
             code = str((item or {}).get("f12") or "").strip()
             name = str((item or {}).get("f14") or "").strip()
             if not code.isdigit() or len(code) > 6:
@@ -157,6 +165,222 @@ def _load_universe_from_eastmoney() -> List[Tuple[str, str, str]]:
     except Exception as e:
         logger.warning("从东方财富接口加载股票池失败: %s", e)
     return rows
+
+
+def _load_eastmoney_clist_rows(fields: str, fid: str = "f12", max_pages: int = 40) -> List[dict]:
+    """
+    东方财富全A列表接口分页抓取（接口单页有上限，需翻页）。
+    """
+    out: List[dict] = []
+    fs = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+    pz = 200
+    session = requests.Session()
+    session.trust_env = False
+    _disable_proxy_for_requests()
+    for pn in range(1, max_pages + 1):
+        url = (
+            "https://80.push2.eastmoney.com/api/qt/clist/get"
+            f"?pn={pn}&pz={pz}&po=1&np=1&fltt=2&invt=2&fid={fid}"
+            f"&fs={fs}&fields={fields}"
+        )
+        diff: List[dict] = []
+        last_err: Optional[Exception] = None
+        ok = False
+        for attempt in range(3):
+            try:
+                resp = session.get(url, timeout=15, headers=_EM_HEADERS)
+                resp.raise_for_status()
+                data = resp.json()
+                diff = (((data or {}).get("data") or {}).get("diff")) or []
+                if not isinstance(diff, list):
+                    diff = []
+                ok = True
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(0.4 * (attempt + 1))
+        if not ok:
+            if out:
+                logger.warning("东方财富 clist 分页中断 pn=%s（返回部分数据）: %s", pn, last_err)
+                break
+            logger.warning("东方财富 clist 拉取失败: %s", last_err)
+            return out
+        if len(diff) == 0:
+            break
+        out.extend(diff)
+        if len(diff) < pz:
+            break
+        time.sleep(0.04)
+    return out
+
+
+def _load_em_profile_map() -> Dict[str, Dict[str, Optional[str]]]:
+    """
+    从东方财富批量获取股票画像信息：
+    - f100: 行业（这里用于“板块”列）
+    - f103: 概念（逗号分隔）
+    """
+    now = time.time()
+    cached = _EM_PROFILE_CACHE
+    cached_data = cached.get("data") if isinstance(cached.get("data"), dict) else {}
+    if now < float(cached.get("expire_at", 0)) and isinstance(cached_data, dict):
+        return cached.get("data") or {}
+
+    profile_map: Dict[str, Dict[str, Optional[str]]] = {}
+    try:
+        rows = _load_eastmoney_clist_rows(fields="f12,f100,f103", fid="f12", max_pages=45)
+        for item in rows:
+            code = str((item or {}).get("f12") or "").strip()
+            if not code.isdigit() or len(code) > 6:
+                continue
+            code = code.zfill(6)
+            market = "SH" if code.startswith("6") else "SZ"
+            ts_code = f"{code}.{market}"
+            if _is_star_market_board(ts_code):
+                continue
+
+            board = str((item or {}).get("f100") or "").strip()
+            concept = str((item or {}).get("f103") or "").strip()
+            board = None if (not board or board == "-") else board
+            concept = None if (not concept or concept == "-") else concept
+            profile_map[ts_code] = {
+                "board": board,
+                "concept": concept,
+            }
+    except Exception as e:
+        logger.warning("加载东方财富板块/概念信息失败: %s", e)
+        profile_map = {}
+
+    if profile_map:
+        _EM_PROFILE_CACHE["data"] = profile_map
+        _EM_PROFILE_CACHE["expire_at"] = time.time() + _EM_PROFILE_CACHE_TTL_SECONDS
+        return profile_map
+
+    # 拉取失败时，优先沿用旧缓存，避免整页突然全空
+    if isinstance(cached_data, dict) and cached_data:
+        _EM_PROFILE_CACHE["expire_at"] = time.time() + 120
+        return cached_data
+
+    # 首次即失败：仅短暂缓存空结果，允许快速重试
+    _EM_PROFILE_CACHE["data"] = {}
+    _EM_PROFILE_CACHE["expire_at"] = time.time() + 30
+    return {}
+
+
+def _clean_html_text(raw: str) -> str:
+    text = re.sub(r"<[^>]+>", "", raw or "")
+    text = text.replace("&nbsp;", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _parse_ths_board(field_html: str) -> Optional[str]:
+    m = re.search(
+        r"三级行业分类：\s*<span[^>]*>(.*?)</span>",
+        field_html or "",
+        flags=re.I | re.S,
+    )
+    if not m:
+        return None
+    board = _clean_html_text(m.group(1))
+    board = re.sub(r"[（(]\s*共\s*\d+\s*家\s*[)）]", "", board).strip()
+    return board or None
+
+
+def _parse_ths_concepts(concept_html: str) -> Optional[str]:
+    blocks = re.findall(
+        r"<td[^>]*class\s*=\s*[\"'][^\"']*gnName[^\"']*[\"'][^>]*>(.*?)</td>",
+        concept_html or "",
+        flags=re.I | re.S,
+    )
+    names: List[str] = []
+    for block in blocks:
+        name = _clean_html_text(block)
+        if not name:
+            continue
+        if name in names:
+            continue
+        names.append(name)
+        if len(names) >= _THS_CONCEPT_MAX_ITEMS:
+            break
+    return "，".join(names) if names else None
+
+
+def _fetch_ths_profile(ts_code: str) -> Dict[str, Optional[str]]:
+    code = str(ts_code or "").split(".")[0].strip()
+    if not code.isdigit():
+        return {"board": None, "concept": None}
+    code = code.zfill(6)
+
+    session = requests.Session()
+    session.trust_env = False
+    _disable_proxy_for_requests()
+
+    board: Optional[str] = None
+    concept: Optional[str] = None
+
+    try:
+        field_url = f"https://basic.10jqka.com.cn/{code}/field.html"
+        resp = session.get(field_url, headers=_THS_HEADERS, timeout=12)
+        resp.raise_for_status()
+        resp.encoding = "gbk"
+        board = _parse_ths_board(resp.text)
+    except Exception:
+        board = None
+
+    try:
+        concept_url = f"https://basic.10jqka.com.cn/{code}/concept.html"
+        resp = session.get(concept_url, headers=_THS_HEADERS, timeout=12)
+        resp.raise_for_status()
+        resp.encoding = "gbk"
+        concept = _parse_ths_concepts(resp.text)
+    except Exception:
+        concept = None
+
+    return {"board": board, "concept": concept}
+
+
+def _load_ths_profile_map(ts_codes: List[str], fetch_cap: int = _THS_PROFILE_FALLBACK_FETCH_CAP) -> Dict[str, Dict[str, Optional[str]]]:
+    if not ts_codes:
+        return {}
+
+    now = time.time()
+    out: Dict[str, Dict[str, Optional[str]]] = {}
+    to_fetch: List[str] = []
+
+    # 先用本进程缓存，避免重复抓取同一个股票。
+    for ts_code in ts_codes:
+        cache_item = _THS_PROFILE_CACHE.get(ts_code) or {}
+        updated_at = float(cache_item.get("updated_at", 0) or 0)
+        if now - updated_at < _THS_PROFILE_ITEM_TTL_SECONDS:
+            out[ts_code] = {
+                "board": cache_item.get("board"),
+                "concept": cache_item.get("concept"),
+            }
+        else:
+            to_fetch.append(ts_code)
+
+    if not to_fetch:
+        return out
+
+    fetch_list = to_fetch[: max(1, int(fetch_cap))]
+    max_workers = min(8, max(2, len(fetch_list)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_ts = {executor.submit(_fetch_ths_profile, ts_code): ts_code for ts_code in fetch_list}
+        for future in as_completed(future_to_ts):
+            ts_code = future_to_ts[future]
+            try:
+                profile = future.result()
+            except Exception:
+                profile = {"board": None, "concept": None}
+            _THS_PROFILE_CACHE[ts_code] = {
+                "updated_at": time.time(),
+                "board": profile.get("board"),
+                "concept": profile.get("concept"),
+            }
+            out[ts_code] = profile
+
+    return out
 
 
 def _load_universe() -> List[Tuple[str, str, str]]:
@@ -204,6 +428,7 @@ def _parse_gtimg_response(text: str) -> List[dict]:
         price = _safe_float(parts[_IDX_PRICE]) if len(parts) > _IDX_PRICE else None
         chg_amt = _safe_float(parts[_IDX_CHG_AMT]) if len(parts) > _IDX_CHG_AMT else None
         pct = _safe_float(parts[_IDX_PCT]) if len(parts) > _IDX_PCT else None
+        turnover_rate = _safe_float(parts[_IDX_TURNOVER_RATE]) if len(parts) > _IDX_TURNOVER_RATE else None
         mv_yi = _safe_float(parts[_IDX_TOTAL_MV_YI])
         float_mv_yi = (
             _safe_float(parts[_IDX_FLOAT_MV_YI])
@@ -217,6 +442,7 @@ def _parse_gtimg_response(text: str) -> List[dict]:
                 "price": price,
                 "pct_chg": pct,
                 "change_amount": chg_amt,
+                "turnover_rate": turnover_rate,
                 "total_mv_yi": mv_yi,
                 "float_mv_yi": float_mv_yi,
             }
@@ -263,6 +489,7 @@ def screen_stocks_by_mv_and_pct(
         )
 
     sym_to_meta = {u[0]: (u[1], u[2]) for u in universe}
+    em_profile_map = _load_em_profile_map()
     symbols = list(sym_to_meta.keys())
 
     tz_cn = timezone(timedelta(hours=8))
@@ -273,6 +500,7 @@ def screen_stocks_by_mv_and_pct(
         raise RuntimeError("腾讯行情接口未返回有效数据，请检查网络或稍后重试。")
 
     rows: List[dict] = []
+    row_ts_codes: List[str] = []
     for q in quotes:
         gsym = q.get("gtimg_symbol")
         if not gsym or gsym not in sym_to_meta:
@@ -296,6 +524,10 @@ def screen_stocks_by_mv_and_pct(
         nm = (q.get("name_raw") or "").strip() or name_hint
         fmv = q.get("float_mv_yi")
         float_mv_yi = round(fmv, 4) if fmv is not None else None
+        profile = em_profile_map.get(ts_code) or {}
+        board = profile.get("board")
+        concept = profile.get("concept")
+        turnover_rate = q.get("turnover_rate")
 
         rows.append(
             {
@@ -306,15 +538,46 @@ def screen_stocks_by_mv_and_pct(
                 "change_amount": q.get("change_amount"),
                 "total_mv_yi": round(mv_yi, 4),
                 "float_mv_yi": float_mv_yi,
-                "turnover_rate": None,
+                "turnover_rate": round(turnover_rate, 4) if turnover_rate is not None else None,
+                "board": board,
+                "concept": concept,
                 "volume": None,
                 "amount": None,
             }
         )
+        row_ts_codes.append(ts_code)
 
-    rows.sort(key=lambda x: (x["pct_chg"] or 0), reverse=True)
+    sorted_pairs = sorted(zip(rows, row_ts_codes), key=lambda pair: (pair[0].get("pct_chg") or 0), reverse=True)
+    rows = [p[0] for p in sorted_pairs]
+    row_ts_codes = [p[1] for p in sorted_pairs]
     if limit and limit > 0:
         rows = rows[: int(limit)]
+        row_ts_codes = row_ts_codes[: int(limit)]
+
+    em_profile_non_empty = 0
+    for row in rows:
+        if row.get("board") or row.get("concept"):
+            em_profile_non_empty += 1
+
+    ths_fallback_filled = 0
+    missing_ts_codes = [
+        ts_code
+        for row, ts_code in zip(rows, row_ts_codes)
+        if not row.get("board") or not row.get("concept")
+    ]
+    if missing_ts_codes:
+        unique_missing_ts_codes = list(dict.fromkeys(missing_ts_codes))
+        ths_profile_map = _load_ths_profile_map(unique_missing_ts_codes)
+        for row, ts_code in zip(rows, row_ts_codes):
+            profile = ths_profile_map.get(ts_code) or {}
+            board_before = row.get("board")
+            concept_before = row.get("concept")
+            if not board_before:
+                row["board"] = profile.get("board")
+            if not concept_before:
+                row["concept"] = profile.get("concept")
+            if ((not board_before and row.get("board")) or (not concept_before and row.get("concept"))):
+                ths_fallback_filled += 1
 
     meta = {
         "fetched_at": fetched_at,
@@ -322,6 +585,8 @@ def screen_stocks_by_mv_and_pct(
         "universe_size": len(symbols),
         "quotes_parsed": len(quotes),
         "total_after_filter": len(rows),
+        "em_profile_non_empty": em_profile_non_empty,
+        "ths_fallback_filled": ths_fallback_filled,
         "exclude_star_board": True,
         "exclude_note": "已排除科创板（代码 688 开头）",
     }
