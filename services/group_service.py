@@ -31,8 +31,8 @@ _GROUP_CACHE = {
     False: {'expire_at': 0.0, 'data': None},  # include_stocks=False
 }
 _GROUP_CACHE_TTL_SECONDS = {
-    True: 10.0,
-    False: 15.0,
+    True: 60.0,
+    False: 120.0,
 }
 _GROUP_INDEX_INIT_LOCK = Lock()
 _GROUP_INDEX_INIT_DONE = False
@@ -181,19 +181,35 @@ def get_all_groups(include_stocks=True):
                 group['stocks'] = stocks
                 group['stock_count'] = len(stocks)
         else:
+            # 两段查询替代 LEFT JOIN + GROUP BY，避免在大明细表上全表聚合。
             cursor.execute(
                 """
-                SELECT g.*, COUNT(i.id) AS stock_count
+                SELECT g.*
                 FROM stock_groups g
-                LEFT JOIN stock_group_items i ON g.id = i.group_id
                 WHERE g.is_active = 1
-                GROUP BY g.id
                 ORDER BY g.sort_order, g.id
                 """
             )
             groups = cursor.fetchall()
+            if not groups:
+                return []
+
+            group_ids = [g['id'] for g in groups]
+            placeholders = ','.join(['%s'] * len(group_ids))
+            cursor.execute(
+                f"""
+                SELECT group_id, COUNT(*) AS stock_count
+                FROM stock_group_items
+                WHERE group_id IN ({placeholders})
+                GROUP BY group_id
+                """,
+                tuple(group_ids),
+            )
+            count_map = {row['group_id']: int(row.get('stock_count') or 0) for row in cursor.fetchall()}
+
             for group in groups:
                 _serialize_group_datetimes(group)
+                group['stock_count'] = count_map.get(group['id'], 0)
 
         _set_cached_groups(include_stocks, groups)
         return groups

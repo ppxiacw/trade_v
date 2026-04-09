@@ -1,13 +1,18 @@
 import os
 
 import requests
-import json
 import random
 import re
 import logging
-ma_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
-bottom_line_webhook_url = 'https://oapi.dingtalk.com/robot/send?access_token=bce85be747a6d8d29caa7b910b54bb442fb86fe77b7839375c4e41e71fe6fdae'
-common = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
+
+_DEFAULT_MA_WEBHOOK_URL = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
+_DEFAULT_COMMON_WEBHOOK_URL = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
+_REQUEST_TIMEOUT = (
+    float(os.getenv('DINGTALK_CONNECT_TIMEOUT_SECONDS', '3')),
+    float(os.getenv('DINGTALK_READ_TIMEOUT_SECONDS', '10')),
+)
+ma_webhook_url = os.getenv('DINGTALK_WEBHOOK_MA', _DEFAULT_MA_WEBHOOK_URL)
+common = os.getenv('DINGTALK_WEBHOOK_COMMON', _DEFAULT_COMMON_WEBHOOK_URL)
 
 
 def send_dingtalk_message(title, tsCode, webhook_url=common):
@@ -36,7 +41,18 @@ def send_dingtalk_message(title, tsCode, webhook_url=common):
     }
     logging.info(title + "\n")
     if os.getenv('ENABLE_REQUESTS') is None:
-        requests.post(webhook_url, headers=headers, json=data, verify=False)
+        try:
+            response = requests.post(
+                webhook_url,
+                headers=headers,
+                json=data,
+                verify=False,
+                timeout=_REQUEST_TIMEOUT,
+            )
+            if response.status_code >= 400:
+                logging.warning("钉钉推送失败 status=%s body=%s", response.status_code, response.text[:200])
+        except Exception as e:
+            logging.warning("钉钉推送异常: %s", e)
 
 
 def generate_stock_image_url(stock_code: str, k_type='min') -> str:

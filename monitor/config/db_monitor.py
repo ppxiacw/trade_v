@@ -4,9 +4,8 @@ from sqlalchemy import create_engine, text
 from contextlib import contextmanager
 import logging
 from typing import List, Dict, Any, Optional, Union
+from config.runtime_config import get_db_runtime_settings, get_db_connection_uri
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -22,17 +21,17 @@ class DatabaseManager:
         """初始化连接池"""
         try:
             self.db_pool = pooling.MySQLConnectionPool(
-                pool_name="flask_pool",
-                pool_size=10,
+                pool_name=f"{self.db_config.get('pool_name', 'trade_v_pool')}_monitor",
+                pool_size=self.db_config.get("pool_size", 10),
                 host=self.db_config["host"],
                 user=self.db_config["user"],
                 password=self.db_config["password"],
                 database=self.db_config["database"],
                 autocommit=True,
                 pool_reset_session=True,
-                connect_timeout=30,
-                charset='utf8mb4',
-                collation='utf8mb4_unicode_ci'
+                connect_timeout=self.db_config.get("connect_timeout", 30),
+                charset=self.db_config.get("charset", "utf8mb4"),
+                collation=self.db_config.get("collation", "utf8mb4_unicode_ci"),
             )
             logger.info("数据库连接池初始化成功")
         except Error as e:
@@ -42,7 +41,7 @@ class DatabaseManager:
     def _init_engine(self):
         """初始化SQLAlchemy引擎"""
         try:
-            connection_string = f"mysql+mysqlconnector://{self.db_config['user']}:{self.db_config['password']}@{self.db_config['host']}/{self.db_config['database']}"
+            connection_string = get_db_connection_uri(self.db_config)
             self.engine = create_engine(
                 connection_string,
                 pool_pre_ping=True,  # 执行前ping检测连接有效性
@@ -268,12 +267,7 @@ class DatabaseManager:
 
 
 # 数据库配置
-db_config = {
-    "user": "trade",
-    "password": "trade007576!",
-    "host": "212.64.32.213",
-    "database": "trade",
-}
+db_config = get_db_runtime_settings()
 
 # 创建全局数据库管理器实例
 db_manager = DatabaseManager(db_config)

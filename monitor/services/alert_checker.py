@@ -207,19 +207,23 @@ class AlertChecker:
         return alerts
 
     def _check_common_by_min(self, stock, window=1):
-        if not self._is_new_candle_data(stock, window):
+        results_min = IndexAnalysis.rt_min(stock, window)
+        if results_min is None or results_min.empty:
             return []
 
-        results_min = IndexAnalysis.rt_min(stock, window)
+        if not self._is_new_candle_data(stock, window, results_min):
+            return []
+
         if len(results_min) < 4:
             return []
 
         return self._analyze_technical_patterns(stock, window, results_min)
 
-    def _is_new_candle_data(self, stock, window):
+    def _is_new_candle_data(self, stock, window, results_min=None):
         """检查是否有新的K线数据"""
-        results_min = IndexAnalysis.rt_min(stock, window)
-        if results_min.empty:
+        if results_min is None:
+            results_min = IndexAnalysis.rt_min(stock, window)
+        if results_min is None or results_min.empty:
             return False
 
         current_time = results_min.iloc[-1]['candle_end_time']

@@ -18,12 +18,6 @@ def format_stock_code(code, target_format='prefix'):
     Raises:
         ValueError: 当输入代码格式无法识别或不受支持时
     """
-    # 交易所映射 (扩展说明，不影响逻辑)
-    exchange_map = {
-        'sh': '上海交易所',
-        'sz': '深圳交易所'
-    }
-
     # 核心修改：增强的代码->交易所映射规则
     # 规则优先级：ETF > 股票
     def get_exchange_by_number(number_part):
@@ -89,24 +83,3 @@ def format_stock_code(code, target_format='prefix'):
         return f"{number_part}.{exchange}"
     else:
         raise ValueError(f"不支持的格式: {target_format}，请使用 'prefix'、'pure' 或 'suffix'")
-
-
-# 测试示例
-if __name__ == "__main__":
-    test_cases = [
-        # (输入代码, 目标格式, 期望输出)
-        ('510300', 'prefix', 'sh510300'),  # 沪深300 ETF (沪市)
-        ('159919', 'prefix', 'sz159919'),  # 沪深300 ETF (深市)
-        ('588000', 'prefix', 'sh588000'),  # 科创50 ETF
-        ('159915', 'suffix', '159915.sz'),  # 创业板 ETF
-        ('sh510500', 'pure', '510500'),  # 中证500 ETF
-        ('sz159995', 'pure', '159995'),  # 芯片ETF
-        ('000001', 'prefix', 'sz000001'),  # 平安银行 (深市股票)
-        ('600000', 'prefix', 'sh600000'),  # 浦发银行 (沪市股票)
-        ('300750', 'prefix', 'sz300750'),  # 宁德时代 (创业板股票)
-    ]
-
-    print("测试结果：")
-    for input_code, fmt, expected in test_cases:
-        result = format_stock_code(input_code, fmt)
-        print(result)

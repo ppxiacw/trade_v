@@ -323,27 +323,28 @@ class IndexAnalysis:
         使用 akshare 获取历史分钟数据
         """
         now = datetime.now()
-        current_time = now.strftime('%H:%M:%S')
-        
-        # 获取今日分钟级数据
-        today_df = IndexAnalysis.rt_min(stock_code, k_type=k_type, num=320)
-        if today_df.empty:
+        current_time = now.strftime('%H:%M')
+
+        # 仅拉取一次分钟K，后续切片复用，避免重复网络请求。
+        all_df = IndexAnalysis.rt_min(stock_code, k_type=k_type, num=320)
+        if all_df is None or all_df.empty:
             return None
 
+        all_df = all_df.sort_values('candle_end_time').reset_index(drop=True)
+        today_date = now.date()
+
         # 筛选今日开盘到当前时刻的数据
-        today_df = today_df[today_df['candle_end_time'].dt.date == now.date()]
+        today_df = all_df[all_df['candle_end_time'].dt.date == today_date]
         today_df = today_df[today_df['candle_end_time'].dt.strftime('%H:%M') <= current_time]
         today_volume = today_df['amount'].sum()
 
-        # 获取数据中的所有日期
-        all_df = IndexAnalysis.rt_min(stock_code, k_type=k_type, num=320)
-        unique_dates = all_df['candle_end_time'].dt.date.unique()
-        
+        unique_dates = sorted(all_df['candle_end_time'].dt.date.unique())
         if len(unique_dates) < 2:
             return None
-        
-        # 取上一个交易日
-        last_trading_date = sorted(unique_dates)[-2]
+
+        # 优先找今天之前最近一个交易日；若 today 不在样本内，退化为倒数第二天。
+        prev_dates = [d for d in unique_dates if d < today_date]
+        last_trading_date = prev_dates[-1] if prev_dates else unique_dates[-2]
 
         # 筛选上一个交易日相同时段的数据
         last_trading_df = all_df[all_df['candle_end_time'].dt.date == last_trading_date]

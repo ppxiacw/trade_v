@@ -14,7 +14,8 @@ _logger = logging.getLogger(__name__)
 def get_groups():
     """获取所有分组"""
     try:
-        include_stocks_raw = request.args.get('include_stocks', 'true')
+        # 默认不携带 stocks，避免首屏大查询阻塞；需要明细时调用 /groups/<id>
+        include_stocks_raw = request.args.get('include_stocks', 'false')
         include_stocks = str(include_stocks_raw).lower() == 'true'
         groups = group_service.get_all_groups(include_stocks=include_stocks)
 

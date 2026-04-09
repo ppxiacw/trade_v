@@ -2,9 +2,12 @@
 股票相关路由
 """
 import logging
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 from config.dbconfig import exeQuery
+from config.runtime_config import get_app_runtime_env, get_app_runtime_version
+from monitor.config.db_monitor import db_manager
 from utils.common import format_stock_code
 from services.stock_screen_service import screen_stocks_by_mv_and_pct
 from services.daily_kline_sync_service import (
@@ -15,6 +18,49 @@ from services.daily_kline_sync_service import (
 
 stock_bp = Blueprint('stock', __name__)
 _logger = logging.getLogger(__name__)
+_APP_STARTED_AT = datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+
+@stock_bp.route('/health', methods=['GET'])
+def health_check():
+    """
+    轻量健康检查：用于部署后自动验收（进程 + 数据库）。
+    """
+    db_ok = False
+    db_error = None
+    try:
+        probe = db_manager.execute_query("SELECT 1 AS ok")
+        db_ok = bool(probe and int((probe[0] or {}).get('ok', 0)) == 1)
+    except Exception as e:
+        db_error = str(e)
+        _logger.warning("health_check 数据库探活失败: %s", e)
+
+    payload = {
+        'success': db_ok,
+        'service': 'trade_v',
+        'status': 'ok' if db_ok else 'degraded',
+        'env': get_app_runtime_env(),
+        'version': get_app_runtime_version(),
+        'started_at': _APP_STARTED_AT,
+        'db_ok': db_ok,
+    }
+    if db_error:
+        payload['db_error'] = db_error
+    return jsonify(payload), (200 if db_ok else 503)
+
+
+@stock_bp.route('/version', methods=['GET'])
+def get_version():
+    """
+    返回当前运行版本信息，用于前后端发布一致性核对。
+    """
+    return jsonify({
+        'success': True,
+        'service': 'trade_v',
+        'env': get_app_runtime_env(),
+        'version': get_app_runtime_version(),
+        'started_at': _APP_STARTED_AT,
+    })
 
 
 @stock_bp.route('/get_stock_list')

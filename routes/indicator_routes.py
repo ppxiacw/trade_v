@@ -1,14 +1,35 @@
 """
 技术指标相关路由
 """
+import logging
 import re
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 import pandas as pd
 from flask import Blueprint, request, jsonify
 from utils.IndicatorCalculation import IndicatorCalculation
 
 indicator_bp = Blueprint('indicator', __name__)
+_logger = logging.getLogger(__name__)
+
+_KLINE_TIMEOUT_SECONDS = 8
+_RSI_BATCH_MAX_WORKERS = 6
+
+
+def _normalize_stock_code(stock_code: str) -> str:
+    raw = str(stock_code or "").strip()
+    if not raw:
+        return raw
+    lower = raw.lower()
+    if lower.startswith("sh") or lower.startswith("sz"):
+        return lower
+    if raw.isdigit():
+        num = raw.zfill(6)
+        return f"sh{num}" if num.startswith("6") else f"sz{num}"
+    return lower
 
 
 def parse_jsonp_response(text: str) -> dict:
@@ -19,7 +40,7 @@ def parse_jsonp_response(text: str) -> dict:
     try:
         # 尝试直接解析为 JSON
         return json.loads(text)
-    except:
+    except Exception:
         pass
     
     # 解析 JSONP 格式: varname={...}
@@ -27,7 +48,7 @@ def parse_jsonp_response(text: str) -> dict:
     if match:
         try:
             return json.loads(match.group(1))
-        except:
+        except Exception:
             pass
     
     return None
@@ -46,14 +67,7 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
         DataFrame with columns: time, open, close, high, low, volume
     """
     # 格式化股票代码
-    if stock_code.startswith('sh') or stock_code.startswith('sz'):
-        formatted_code = stock_code
-    else:
-        # 纯数字，判断交易所
-        if stock_code.startswith('6'):
-            formatted_code = f'sh{stock_code}'
-        else:
-            formatted_code = f'sz{stock_code}'
+    formatted_code = _normalize_stock_code(stock_code)
     
     # 根据周期类型选择接口
     if period in ['day', 'week', 'month']:
@@ -66,19 +80,19 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
         kline_key = period
     
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=_KLINE_TIMEOUT_SECONDS)
         text = response.text
         
         # 解析 JSONP 响应
         data = parse_jsonp_response(text)
         
         if not data or data.get('code') != 0:
-            print(f"接口返回错误: {data}")
+            _logger.warning("K线接口返回错误 stock=%s period=%s data=%s", stock_code, period, data)
             return None
         
         stock_data = data.get('data', {}).get(formatted_code)
         if not stock_data:
-            print(f"未找到股票数据: {formatted_code}")
+            _logger.warning("K线接口未找到股票数据 stock=%s formatted=%s", stock_code, formatted_code)
             return None
         
         kline_data = stock_data.get(kline_key)
@@ -87,7 +101,7 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
             kline_data = stock_data.get(period)
         
         if not kline_data or not isinstance(kline_data, list):
-            print(f"未找到K线数据，可用keys: {stock_data.keys()}")
+            _logger.warning("K线接口未找到K线数据 stock=%s keys=%s", stock_code, list(stock_data.keys()))
             return None
         
         # 转换为DataFrame
@@ -118,9 +132,7 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
         return df
         
     except Exception as e:
-        print(f"获取K线数据失败: {e}")
-        import traceback
-        traceback.print_exc()
+        _logger.exception("获取K线数据失败 stock=%s period=%s error=%s", stock_code, period, e)
         return None
 
 
@@ -129,20 +141,13 @@ def test_kline(stock_code):
     """测试K线数据获取"""
     period = request.args.get('period', 'm30')
     
-    # 格式化股票代码
-    if stock_code.startswith('sh') or stock_code.startswith('sz'):
-        formatted_code = stock_code
-    else:
-        if stock_code.startswith('6'):
-            formatted_code = f'sh{stock_code}'
-        else:
-            formatted_code = f'sz{stock_code}'
+    formatted_code = _normalize_stock_code(stock_code)
     
     # 构建URL
     url = f'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param={formatted_code},{period},,100&_var=kline_{period}'
     
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=_KLINE_TIMEOUT_SECONDS)
         text = response.text[:500]  # 只返回前500字符
         
         return jsonify({
@@ -153,6 +158,32 @@ def test_kline(stock_code):
         })
     except Exception as e:
         return jsonify({'error': str(e)})
+
+
+def _calc_single_stock_rsi(stock_code: str, period: str) -> dict:
+    df = fetch_kline_data(stock_code, period, count=100)
+    if df is not None and len(df) >= 15:
+        rsi_values = IndicatorCalculation.get_rsi_values(df)
+        rsi6 = rsi_values.get('RSI6')
+        rsi12 = rsi_values.get('RSI12')
+
+        # 转换为 Python 原生类型
+        rsi6 = float(rsi6) if rsi6 is not None else None
+        rsi12 = float(rsi12) if rsi12 is not None else None
+        condition_met = bool(rsi6 < 20 or rsi6 > 80) if rsi6 is not None else False
+
+        return {
+            'rsi6': rsi6,
+            'rsi12': rsi12,
+            'condition_met': condition_met,
+        }
+
+    return {
+        'rsi6': None,
+        'rsi12': None,
+        'condition_met': False,
+        'error': '数据获取失败',
+    }
 
 
 @indicator_bp.route('/rsi', methods=['GET'])
@@ -299,46 +330,54 @@ def get_rsi_batch():
         }
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         stock_codes = data.get('stock_codes', [])
         period = data.get('period', 'm30')
         
         if not stock_codes:
             return jsonify({'success': False, 'message': '缺少股票代码列表'}), 400
         
+        stock_codes = [str(item).strip() for item in stock_codes if str(item).strip()]
+        if not stock_codes:
+            return jsonify({'success': False, 'message': '股票代码列表为空'}), 400
+
         results = {}
-        for stock_code in stock_codes:
-            df = fetch_kline_data(stock_code, period, count=100)
-            
-            if df is not None and len(df) >= 15:
-                rsi_values = IndicatorCalculation.get_rsi_values(df)
-                rsi6 = rsi_values.get('RSI6')
-                rsi12 = rsi_values.get('RSI12')
-                
-                # 转换为 Python 原生类型
-                rsi6 = float(rsi6) if rsi6 is not None else None
-                rsi12 = float(rsi12) if rsi12 is not None else None
-                condition_met = bool(rsi6 < 20 or rsi6 > 80) if rsi6 is not None else False
-                
-                results[stock_code] = {
-                    'rsi6': rsi6,
-                    'rsi12': rsi12,
-                    'condition_met': condition_met
-                }
-            else:
-                results[stock_code] = {
-                    'rsi6': None,
-                    'rsi12': None,
-                    'condition_met': False,
-                    'error': '数据获取失败'
-                }
+        start_at = time.perf_counter()
+        max_workers = min(_RSI_BATCH_MAX_WORKERS, len(stock_codes))
+        max_workers = max(1, max_workers)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_code = {
+                pool.submit(_calc_single_stock_rsi, stock_code, period): stock_code
+                for stock_code in stock_codes
+            }
+            for future in as_completed(future_to_code):
+                stock_code = future_to_code[future]
+                try:
+                    results[stock_code] = future.result()
+                except Exception as e:
+                    _logger.exception("批量计算RSI单股失败 stock=%s period=%s error=%s", stock_code, period, e)
+                    results[stock_code] = {
+                        'rsi6': None,
+                        'rsi12': None,
+                        'condition_met': False,
+                        'error': f'计算失败: {str(e)}',
+                    }
+
+        elapsed_ms = (time.perf_counter() - start_at) * 1000
         
         return jsonify({
             'success': True,
             'data': results,
-            'period': period
+            'period': period,
+            'meta': {
+                'stock_count': len(stock_codes),
+                'max_workers': max_workers,
+                'elapsed_ms': round(elapsed_ms, 2),
+            },
         })
         
     except Exception as e:
+        _logger.exception("批量计算RSI失败")
         return jsonify({'success': False, 'message': f'批量计算RSI失败: {str(e)}'}), 500
 
