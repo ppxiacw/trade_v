@@ -24,6 +24,7 @@ def get_db_runtime_settings() -> Dict[str, Any]:
         "pool_name": os.getenv("DB_POOL_NAME", "trade_v_pool"),
         "pool_size": _get_int_env("DB_POOL_SIZE", 10),
         "connect_timeout": _get_int_env("DB_CONNECT_TIMEOUT", 30),
+        "pool_recycle_seconds": _get_int_env("DB_POOL_RECYCLE_SECONDS", 300),
         "charset": os.getenv("DB_CHARSET", "utf8mb4"),
         "collation": os.getenv("DB_COLLATION", "utf8mb4_unicode_ci"),
     }

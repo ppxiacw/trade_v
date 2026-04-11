@@ -1,6 +1,5 @@
-import mysql.connector
 from mysql.connector import pooling, Error
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from contextlib import contextmanager
 import logging
 from typing import List, Dict, Any, Optional, Union
@@ -42,9 +41,14 @@ class DatabaseManager:
         """初始化SQLAlchemy引擎"""
         try:
             connection_string = get_db_connection_uri(self.db_config)
+            pool_recycle_seconds = max(1, int(self.db_config.get("pool_recycle_seconds", 300)))
             self.engine = create_engine(
                 connection_string,
                 pool_pre_ping=True,  # 执行前ping检测连接有效性
+                pool_recycle=pool_recycle_seconds,  # 主动回收长时间空闲连接，避免长期驻留后首次请求阻塞
+                pool_use_lifo=True,  # 优先复用最近使用过的连接，减少命中冷旧连接的概率
+                pool_size=self.db_config.get("pool_size", 10),
+                max_overflow=0,
                 echo=False  # 设为True可查看SQL日志
             )
             logger.info("SQLAlchemy引擎初始化成功")
@@ -52,21 +56,43 @@ class DatabaseManager:
             logger.error(f"SQLAlchemy引擎初始化失败: {e}")
             raise
 
+    def _get_connection_via_engine(self):
+        """优先使用支持 pre_ping/recycle 的 SQLAlchemy 连接池。"""
+        return self.engine.raw_connection()
+
+    def _get_connection_via_legacy_pool(self):
+        """
+        兜底走 mysql.connector 连接池。
+        保留该分支，避免 SQLAlchemy 底层连接异常时直接影响监控接口可用性。
+        """
+        conn = self.db_pool.get_connection()
+        if not conn.is_connected():
+            conn.reconnect(attempts=3, delay=1)
+        return conn
+
     @contextmanager
     def get_connection(self):
         """获取数据库连接的上下文管理器"""
         conn = None
         try:
-            conn = self.db_pool.get_connection()
-            if not conn.is_connected():
-                conn.reconnect(attempts=3, delay=1)
+            try:
+                conn = self._get_connection_via_engine()
+            except Exception as engine_error:
+                logger.warning(
+                    "通过 SQLAlchemy 连接池获取连接失败，回退 legacy 连接池: %s",
+                    engine_error,
+                )
+                conn = self._get_connection_via_legacy_pool()
             yield conn
-        except Error as e:
+        except Exception as e:
             logger.error(f"获取数据库连接失败: {e}")
             raise
         finally:
             if conn:
-                conn.close()
+                try:
+                    conn.close()
+                except Exception as close_error:
+                    logger.warning("关闭数据库连接失败: %s", close_error)
 
     def execute_query(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
         """执行查询语句
