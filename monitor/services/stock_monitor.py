@@ -4,6 +4,7 @@ import os
 import threading
 import time
 from datetime import datetime, time as dt_time, timedelta
+from monitor.config.market_time import now_in_market_tz
 
 
 class StockMonitor:
@@ -28,8 +29,8 @@ class StockMonitor:
 
     def _get_market_state(self, now_dt=None):
         """返回市场状态：open / lunch_break / closed"""
-        now_dt = now_dt or datetime.now()
-        now = now_dt.time()
+        now_dt = (now_dt or now_in_market_tz()).replace(tzinfo=None)
+        now = dt_time(now_dt.hour, now_dt.minute, now_dt.second)
         current_weekday = now_dt.weekday()
 
         # 周末休市
@@ -55,7 +56,7 @@ class StockMonitor:
         - 非交易时段尽量睡到下一关键时刻附近，避免每分钟空转。
         - 上限由 NON_TRADING_MAX_SLEEP_SECONDS 控制，防止睡太久影响响应。
         """
-        now_dt = now_dt or datetime.now()
+        now_dt = (now_dt or now_in_market_tz()).replace(tzinfo=None)
         state = self._get_market_state(now_dt)
         now_date = now_dt.date()
 
@@ -98,7 +99,7 @@ class StockMonitor:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
         while True:
-            now_dt = datetime.now()
+            now_dt = now_in_market_tz().replace(tzinfo=None)
             market_state = self._get_market_state(now_dt)
             force_monitoring = self._is_force_monitoring_enabled()
 

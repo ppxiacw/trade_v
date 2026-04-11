@@ -22,6 +22,21 @@ _CACHE_TTL_ALERTS = 8
 _CACHE_TTL_STATS = 12
 
 
+def _format_datetime_for_client(value):
+    if isinstance(value, datetime):
+        return value.strftime('%Y-%m-%d %H:%M:%S')
+    return value
+
+
+def _serialize_alert_rows_for_client(rows):
+    out = []
+    for row in rows or []:
+        item = dict(row)
+        item['trigger_time'] = _format_datetime_for_client(item.get('trigger_time'))
+        out.append(item)
+    return out
+
+
 def _cache_get(cache_key):
     now = time.time()
     with _route_cache_lock:
@@ -444,6 +459,7 @@ def get_alert_history():
         params.extend([limit, offset])
         
         alerts = db_manager.execute_query(query, tuple(params))
+        alerts = _serialize_alert_rows_for_client(alerts)
         
         payload = {
             'success': True,
