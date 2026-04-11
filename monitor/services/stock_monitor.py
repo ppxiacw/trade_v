@@ -93,12 +93,17 @@ class StockMonitor:
 
     def start_monitoring(self):
         logging.info(f"开始监控 {len(self.config.MONITOR_STOCKS)} 个股票")
-        stock_codes = list(self.config.MONITOR_STOCKS.keys())
-
         # 使用线程池处理数据和检查
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+        last_stock_codes = None
 
         while True:
+            stock_codes = list(self.config.MONITOR_STOCKS.keys())
+            current_stock_codes = tuple(stock_codes)
+            if current_stock_codes != last_stock_codes:
+                logging.info("当前监控股票数已更新为 %s", len(stock_codes))
+                last_stock_codes = current_stock_codes
+
             now_dt = now_in_market_tz().replace(tzinfo=None)
             market_state = self._get_market_state(now_dt)
             force_monitoring = self._is_force_monitoring_enabled()
@@ -109,6 +114,10 @@ class StockMonitor:
                 self._maybe_log_non_trading(market_state, sleep_seconds)
                 self._last_market_state = market_state
                 time.sleep(sleep_seconds)
+                continue
+
+            if not stock_codes:
+                time.sleep(max(1, self.config.BASE_INTERVAL))
                 continue
 
             if market_state != self._last_market_state:
@@ -147,6 +156,8 @@ class StockMonitor:
 
     def check_and_send_alerts(self, stock):
         """并行检查并发送警报的辅助方法"""
+        if stock not in self.config.MONITOR_STOCKS:
+            return
         if not self._is_force_monitoring_enabled() and not self.is_market_open():
             return
         alerts = self.alert_checker.check_all_conditions(stock)

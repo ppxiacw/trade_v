@@ -13,6 +13,7 @@ class AlertChecker:
 
     def check_all_conditions(self, stock):
         alerts = []
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
         candles = self.stock_data.get_stock_data(stock)
         if not candles:
             return alerts
@@ -35,11 +36,11 @@ class AlertChecker:
         # alerts.extend(ma_alerts)
 
         # 检查时间窗口内涨跌条件
-        if self.config.MONITOR_STOCKS.get(stock, {}).get("normal_movement"):
+        if stock_cfg.get("normal_movement"):
             conditions = self._check_time_window_conditions(stock, 20)
             alerts.extend(conditions)
 
-        if self.config.MONITOR_STOCKS[stock].get("common", False):
+        if stock_cfg.get("common", False):
             periods = [1, 5, 30]  # 保持硬编码，不修改配置读取
             for period in periods:
                 common_alerts = self._check_common_by_min(stock, period)
@@ -70,7 +71,8 @@ class AlertChecker:
     def _check_time_window_conditions(self, stock, window_sec):
         triggered_conditions = []
         candles = self.stock_data.get_stock_data(stock)
-        price_alerts = self._check_price_movement(stock, candles, window_sec, self.config.MONITOR_STOCKS[stock])
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        price_alerts = self._check_price_movement(stock, candles, window_sec, stock_cfg)
         triggered_conditions.extend(price_alerts)
         return triggered_conditions
 
@@ -130,7 +132,8 @@ class AlertChecker:
         if not candles:
             return []
         current_price = candles[-1]['close']
-        price_thresholds = self.config.MONITOR_STOCKS[stock].get("price_thresholds", [])
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        price_thresholds = stock_cfg.get("price_thresholds", [])
         alerts = []
 
         for threshold_config in price_thresholds:
@@ -150,7 +153,10 @@ class AlertChecker:
 
     def _check_ma_breakdown(self, stock):
         triggered_alerts = []
-        if not self.config.MONITOR_STOCKS[stock].get("break_ma", True):
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        if not stock_cfg:
+            return triggered_alerts
+        if not stock_cfg.get("break_ma", True):
             return triggered_alerts
 
         candles = self.stock_data.get_stock_data(stock)
@@ -160,7 +166,7 @@ class AlertChecker:
         data = IndexAnalysis.my_pro_bar(stock)
         ma = IndexAnalysis.calculate_realtime_ma(data, candles[-1])
         current_price = candles[-1]['low']
-        ma_types = self.config.MONITOR_STOCKS[stock].get("ma_types", [5, 10, 20, 30, 60, 120])
+        ma_types = stock_cfg.get("ma_types", [5, 10, 20, 30, 60, 120])
 
         for ma_type in ma_types:
             ma_key = f"ma{ma_type}"
@@ -177,7 +183,8 @@ class AlertChecker:
         return triggered_alerts
 
     def _check_change_thresholds(self, stock, candles=None):
-        change_thresholds = self.config.MONITOR_STOCKS[stock].get("change_thresholds", [])
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        change_thresholds = stock_cfg.get("change_thresholds", [])
         if not change_thresholds:
             return []
 

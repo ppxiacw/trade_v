@@ -65,6 +65,30 @@ def _invalidate_monitor_cache():
                 _route_cache.pop(key, None)
 
 
+def _reload_monitor_runtime():
+    """
+    将数据库中的监控配置同步到运行中内存对象，确保增删改后无需手动点“重载配置”。
+    """
+    from app import config, stock_data, alert_sender
+
+    config.reload_config()
+    monitor_codes = list(config.MONITOR_STOCKS.keys())
+
+    for stock in monitor_codes:
+        alert_sender.last_alert_time.setdefault(stock, {})
+        stock_data.data_storage.setdefault(
+            stock,
+            {
+                "candles": [],
+                "interval": config.BASE_INTERVAL,
+            },
+        )
+        stock_data.last_update_time.setdefault(stock, datetime.now())
+
+    _invalidate_monitor_cache()
+    return len(monitor_codes)
+
+
 def _build_stock_code_aliases(stock_code, stock_name=""):
     code = str(stock_code or "").strip()
     aliases = set()
@@ -291,19 +315,33 @@ def add_monitor_stock():
         existing = _find_stock_row_by_aliases(raw_stock_code, stock_name)
         
         if existing:
+            reactivate_data = {
+                'is_monitor': 1,
+                'stock_code': stock_code,
+                'stock_name': stock_name or existing.get('stock_name', ''),
+            }
+            if 'common' in data:
+                reactivate_data['common'] = 1 if data['common'] else 0
+            if 'normal_movement' in data:
+                reactivate_data['normal_movement'] = 1 if data['normal_movement'] else 0
+            if 'trigger_min_price' in data:
+                reactivate_data['trigger_min_price'] = data.get('trigger_min_price')
+            if 'trigger_max_price' in data:
+                reactivate_data['trigger_max_price'] = data.get('trigger_max_price')
+
             # 更新为监控状态
             db_manager.execute_update(
                 'stocks',
-                {
-                    'is_monitor': 1,
-                    'stock_code': stock_code,
-                    'stock_name': stock_name or existing.get('stock_name', '')
-                },
+                reactivate_data,
                 'id = %s',
                 (existing['id'],)
             )
-            _invalidate_monitor_cache()
-            return jsonify({'success': True, 'message': '已启用监控'})
+            monitor_count = _reload_monitor_runtime()
+            return jsonify({
+                'success': True,
+                'message': '已启用监控，修改已自动生效',
+                'monitor_count': monitor_count,
+            })
         
         # 新增股票 - 只使用基本字段
         insert_data = {
@@ -311,18 +349,23 @@ def add_monitor_stock():
             'stock_name': stock_name,
             'is_monitor': 1
         }
+        if 'common' in data:
+            insert_data['common'] = 1 if data['common'] else 0
+        if 'normal_movement' in data:
+            insert_data['normal_movement'] = 1 if data['normal_movement'] else 0
         if 'trigger_min_price' in data:
             insert_data['trigger_min_price'] = data.get('trigger_min_price')
         if 'trigger_max_price' in data:
             insert_data['trigger_max_price'] = data.get('trigger_max_price')
         
         stock_id = db_manager.execute_insert('stocks', insert_data)
-        _invalidate_monitor_cache()
+        monitor_count = _reload_monitor_runtime()
         
         return jsonify({
             'success': True, 
-            'message': '添加成功，请点击重载配置使监控生效',
-            'id': stock_id
+            'message': '添加成功，修改已自动生效',
+            'id': stock_id,
+            'monitor_count': monitor_count,
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -365,12 +408,13 @@ def update_monitor_stock(stock_code):
             'id = %s',
             (row['id'],)
         )
-        _invalidate_monitor_cache()
+        monitor_count = _reload_monitor_runtime()
         
         return jsonify({
             'success': True,
-            'message': '更新成功，请点击重载配置使监控生效',
-            'affected': affected
+            'message': '更新成功，修改已自动生效',
+            'affected': affected,
+            'monitor_count': monitor_count,
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -389,12 +433,13 @@ def remove_monitor_stock(stock_code):
             'id = %s',
             (row['id'],)
         )
-        _invalidate_monitor_cache()
+        monitor_count = _reload_monitor_runtime()
         
         return jsonify({
             'success': True,
-            'message': '已停止监控，请点击重载配置使更改生效',
-            'affected': affected
+            'message': '已从监控列表删除，修改已自动生效',
+            'affected': affected,
+            'monitor_count': monitor_count,
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -534,14 +579,12 @@ def get_alert_stats():
 def reload_monitor_config():
     """重新加载监控配置"""
     try:
-        from app import config
-        config.reload_config()
-        _invalidate_monitor_cache()
+        monitor_count = _reload_monitor_runtime()
         
         return jsonify({
             'success': True,
-            'message': '配置已重新加载',
-            'monitor_count': len(config.MONITOR_STOCKS)
+            'message': '配置已重新加载并自动生效',
+            'monitor_count': monitor_count
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

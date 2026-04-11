@@ -18,6 +18,7 @@ class AlertSender:
             return
         current_time = now_in_market_tz().replace(tzinfo=None)
         valid_alerts = []
+        stock_alert_state = self.last_alert_time.setdefault(stock, {})
 
         for alert_item in alerts_with_cooldown:
             # 判断 alert_item 是否为 (alert_data, cooldown) 元组（带冷却时间）
@@ -34,12 +35,12 @@ class AlertSender:
 
             # 使用alert_message作为冷却时间的键
             alert_message = alert_data['alert_message']
-            last_trigger = self.last_alert_time[stock].get(alert_message)
+            last_trigger = stock_alert_state.get(alert_message)
 
             # 判断是否已经过了冷却时间
             if not last_trigger or (current_time - last_trigger).seconds >= cooldown:
                 valid_alerts.append(alert_data)
-                self.last_alert_time[stock][alert_message] = current_time
+                stock_alert_state[alert_message] = current_time
 
         if not valid_alerts:
             return

@@ -58,7 +58,12 @@ class DatabaseManager:
 
     def _get_connection_via_engine(self):
         """优先使用支持 pre_ping/recycle 的 SQLAlchemy 连接池。"""
-        return self.engine.raw_connection()
+        conn = self.engine.raw_connection()
+        try:
+            conn.autocommit = True
+        except Exception as e:
+            logger.warning("设置 SQLAlchemy 原始连接 autocommit=True 失败: %s", e)
+        return conn
 
     def _get_connection_via_legacy_pool(self):
         """
@@ -148,10 +153,19 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(query, params)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 inserted_id = cursor.lastrowid
                 logger.debug(f"插入成功，表: {table}, ID: {inserted_id}")
                 return inserted_id
         except Error as e:
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
             logger.error(f"插入失败: {e}, SQL: {query}")
             return None
         finally:
@@ -186,10 +200,19 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(query, params)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 affected_rows = cursor.rowcount
                 logger.debug(f"更新成功，表: {table}, 影响行数: {affected_rows}")
                 return affected_rows
         except Error as e:
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
             logger.error(f"更新失败: {e}, SQL: {query}")
             return 0
         finally:
@@ -218,10 +241,19 @@ class DatabaseManager:
                     cursor.execute(query, params)
                 else:
                     cursor.execute(query)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 affected_rows = cursor.rowcount
                 logger.debug(f"删除成功，表: {table}, 影响行数: {affected_rows}")
                 return affected_rows
         except Error as e:
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
             logger.error(f"删除失败: {e}, SQL: {query}")
             return 0
         finally:
@@ -244,10 +276,19 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.executemany(query, data)
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 affected_rows = cursor.rowcount
                 logger.debug(f"批量操作成功，影响行数: {affected_rows}")
                 return affected_rows
         except Error as e:
+            try:
+                if conn:
+                    conn.rollback()
+            except Exception:
+                pass
             logger.error(f"批量操作失败: {e}, SQL: {query}")
             return 0
         finally:
