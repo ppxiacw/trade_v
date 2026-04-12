@@ -10,6 +10,7 @@ from utils.tushare_utils import IndexAnalysis
 from monitor.services.volume_radio import get_volume_ratio_simple
 from monitor.config.db_monitor import db_manager, stock_alert_dao
 from monitor.config.stock_code import normalize_monitor_stock_code
+from runtime_state import get_alert_checker, get_alert_sender, get_config, get_stock_data
 
 monitor_bp = Blueprint('monitor', __name__)
 _monitor_columns_lock = threading.Lock()
@@ -69,7 +70,9 @@ def _reload_monitor_runtime():
     """
     将数据库中的监控配置同步到运行中内存对象，确保增删改后无需手动点“重载配置”。
     """
-    from app import config, stock_data, alert_sender
+    config = get_config()
+    stock_data = get_stock_data()
+    alert_sender = get_alert_sender()
 
     config.reload_config()
     monitor_codes = list(config.MONITOR_STOCKS.keys())
@@ -112,21 +115,6 @@ def _build_stock_code_aliases(stock_code, stock_name=""):
             aliases.add(f"{exchange.lower()}{pure}")
             aliases.add(f"{pure}.{exchange}")
             aliases.add(f"{pure}.{exchange.lower()}")
-            aliases.add(f"{pure}.{'SH' if exchange == 'SZ' else 'SZ'}")
-            aliases.add(f"{'sh' if exchange == 'SZ' else 'sz'}{pure}")
-
-    pure_match = re.fullmatch(r"([0-9]{1,6})", code)
-    if pure_match:
-        pure = pure_match.group(1).zfill(6)
-        aliases.update({
-            pure,
-            f"sh{pure}",
-            f"sz{pure}",
-            f"{pure}.SH",
-            f"{pure}.SZ",
-            f"{pure}.sh",
-            f"{pure}.sz",
-        })
 
     return {a for a in aliases if a}
 
@@ -137,10 +125,105 @@ def _find_stock_row_by_aliases(stock_code, stock_name=""):
         return None
     placeholders = ", ".join(["%s"] * len(aliases))
     rows = db_manager.execute_query(
-        f"SELECT id, stock_code, stock_name FROM stocks WHERE stock_code IN ({placeholders}) LIMIT 1",
+        f"SELECT id, stock_code, stock_name FROM stocks WHERE stock_code IN ({placeholders}) ORDER BY is_monitor DESC, id DESC LIMIT 1",
         tuple(aliases)
     )
     return rows[0] if rows else None
+
+
+def _find_stock_row_by_id(stock_id):
+    rows = db_manager.execute_query(
+        "SELECT id, stock_code, stock_name FROM stocks WHERE id = %s LIMIT 1",
+        (stock_id,),
+    )
+    return rows[0] if rows else None
+
+
+def _find_stock_row_by_exact_code(stock_code, exclude_id=None):
+    if not stock_code:
+        return None
+
+    query = "SELECT id, stock_code, stock_name FROM stocks WHERE stock_code = %s"
+    params = [stock_code]
+    if exclude_id is not None:
+        query += " AND id <> %s"
+        params.append(exclude_id)
+    query += " ORDER BY is_monitor DESC, id DESC LIMIT 1"
+
+    rows = db_manager.execute_query(query, tuple(params))
+    return rows[0] if rows else None
+
+
+def _update_monitor_stock_row(row, stock_code_hint, data):
+    if not row:
+        return jsonify({'success': False, 'message': '股票不存在'}), 404
+
+    normalized_input_code = data.get('stock_code') or stock_code_hint or row.get('stock_code')
+    normalized_code = normalize_monitor_stock_code(
+        normalized_input_code,
+        data.get('stock_name', row.get('stock_name', '')),
+    )
+
+    duplicate_row = _find_stock_row_by_exact_code(normalized_code, exclude_id=row['id'])
+    if duplicate_row:
+        return jsonify({
+            'success': False,
+            'message': f"股票代码 {normalized_code} 已存在于记录 #{duplicate_row['id']}，请先清理重复数据",
+        }), 409
+
+    update_data = {}
+
+    if 'is_monitor' in data:
+        update_data['is_monitor'] = 1 if data['is_monitor'] else 0
+    if 'stock_name' in data:
+        update_data['stock_name'] = data['stock_name']
+    update_data['stock_code'] = normalized_code
+    if 'common' in data:
+        update_data['common'] = 1 if data['common'] else 0
+    if 'normal_movement' in data:
+        update_data['normal_movement'] = 1 if data['normal_movement'] else 0
+    if 'trigger_min_price' in data:
+        update_data['trigger_min_price'] = data.get('trigger_min_price')
+    if 'trigger_max_price' in data:
+        update_data['trigger_max_price'] = data.get('trigger_max_price')
+
+    if not update_data:
+        return jsonify({'success': False, 'message': '没有需要更新的数据'}), 400
+
+    affected = db_manager.execute_update(
+        'stocks',
+        update_data,
+        'id = %s',
+        (row['id'],)
+    )
+    monitor_count = _reload_monitor_runtime()
+
+    return jsonify({
+        'success': True,
+        'message': '更新成功，修改已自动生效',
+        'affected': affected,
+        'monitor_count': monitor_count,
+    })
+
+
+def _remove_monitor_stock_row(row):
+    if not row:
+        return jsonify({'success': False, 'message': '股票不存在'}), 404
+
+    affected = db_manager.execute_update(
+        'stocks',
+        {'is_monitor': 0},
+        'id = %s',
+        (row['id'],)
+    )
+    monitor_count = _reload_monitor_runtime()
+
+    return jsonify({
+        'success': True,
+        'message': '已从监控列表删除，修改已自动生效',
+        'affected': affected,
+        'monitor_count': monitor_count,
+    })
 
 
 def _ensure_monitor_stock_columns_once():
@@ -196,7 +279,7 @@ def get_realtime_min():
 @monitor_bp.route('/volume_ratio/<string:stock_codes>', methods=['GET'])
 def volume_ratio(stock_codes=None):
     """获取量比数据"""
-    from app import config
+    config = get_config()
     
     if stock_codes is None:
         stock_codes = list(config.CONFIG_LIST.keys())
@@ -210,7 +293,8 @@ def volume_ratio(stock_codes=None):
 @monitor_bp.route('/ma/<string:stock_codes>', methods=['GET'])
 def calculate_ma_distances(stock_codes=None):
     """计算均线距离"""
-    from app import config, alert_checker
+    config = get_config()
+    alert_checker = get_alert_checker()
     
     if stock_codes is None:
         stock_codes = list(config.CONFIG_LIST.keys())
@@ -310,9 +394,8 @@ def add_monitor_stock():
         
         if not stock_code:
             return jsonify({'success': False, 'message': '股票代码不能为空'}), 400
-        
-        # 检查是否已存在
-        existing = _find_stock_row_by_aliases(raw_stock_code, stock_name)
+
+        existing = _find_stock_row_by_exact_code(stock_code) or _find_stock_row_by_aliases(raw_stock_code, stock_name)
         
         if existing:
             reactivate_data = {
@@ -359,6 +442,8 @@ def add_monitor_stock():
             insert_data['trigger_max_price'] = data.get('trigger_max_price')
         
         stock_id = db_manager.execute_insert('stocks', insert_data)
+        if not stock_id:
+            return jsonify({'success': False, 'message': '添加监控失败，可能存在重复股票代码'}), 409
         monitor_count = _reload_monitor_runtime()
         
         return jsonify({
@@ -378,44 +463,7 @@ def update_monitor_stock(stock_code):
         _ensure_monitor_stock_columns_once()
         data = request.get_json() or {}
         row = _find_stock_row_by_aliases(stock_code, data.get('stock_name', ''))
-        if not row:
-            return jsonify({'success': False, 'message': '股票不存在'}), 404
-        normalized_code = normalize_monitor_stock_code(stock_code, data.get('stock_name', row.get('stock_name', '')))
-        
-        update_data = {}
-        
-        # 只更新数据库中存在的基本字段
-        if 'is_monitor' in data:
-            update_data['is_monitor'] = 1 if data['is_monitor'] else 0
-        if 'stock_name' in data:
-            update_data['stock_name'] = data['stock_name']
-        update_data['stock_code'] = normalized_code
-        if 'common' in data:
-            update_data['common'] = 1 if data['common'] else 0
-        if 'normal_movement' in data:
-            update_data['normal_movement'] = 1 if data['normal_movement'] else 0
-        if 'trigger_min_price' in data:
-            update_data['trigger_min_price'] = data.get('trigger_min_price')
-        if 'trigger_max_price' in data:
-            update_data['trigger_max_price'] = data.get('trigger_max_price')
-        
-        if not update_data:
-            return jsonify({'success': False, 'message': '没有需要更新的数据'}), 400
-        
-        affected = db_manager.execute_update(
-            'stocks',
-            update_data,
-            'id = %s',
-            (row['id'],)
-        )
-        monitor_count = _reload_monitor_runtime()
-        
-        return jsonify({
-            'success': True,
-            'message': '更新成功，修改已自动生效',
-            'affected': affected,
-            'monitor_count': monitor_count,
-        })
+        return _update_monitor_stock_row(row, stock_code, data)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
@@ -425,22 +473,29 @@ def remove_monitor_stock(stock_code):
     """移除监控股票（设置is_monitor为0）"""
     try:
         row = _find_stock_row_by_aliases(stock_code)
-        if not row:
-            return jsonify({'success': False, 'message': '股票不存在'}), 404
-        affected = db_manager.execute_update(
-            'stocks',
-            {'is_monitor': 0},
-            'id = %s',
-            (row['id'],)
-        )
-        monitor_count = _reload_monitor_runtime()
-        
-        return jsonify({
-            'success': True,
-            'message': '已从监控列表删除，修改已自动生效',
-            'affected': affected,
-            'monitor_count': monitor_count,
-        })
+        return _remove_monitor_stock_row(row)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/stocks/by-id/<int:stock_id>', methods=['PUT'])
+def update_monitor_stock_by_id(stock_id):
+    """按记录 ID 更新监控股票配置，避免历史重复代码导致误更新。"""
+    try:
+        _ensure_monitor_stock_columns_once()
+        data = request.get_json() or {}
+        row = _find_stock_row_by_id(stock_id)
+        return _update_monitor_stock_row(row, row.get('stock_code') if row else '', data)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/stocks/by-id/<int:stock_id>', methods=['DELETE'])
+def remove_monitor_stock_by_id(stock_id):
+    """按记录 ID 移除监控股票，避免历史重复代码导致误删除。"""
+    try:
+        row = _find_stock_row_by_id(stock_id)
+        return _remove_monitor_stock_row(row)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

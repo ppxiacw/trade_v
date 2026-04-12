@@ -39,6 +39,7 @@ from monitor.services.alert_checker import AlertChecker
 from monitor.services.alert_sender import AlertSender
 from monitor.services.stock_monitor import StockMonitor
 from services.daily_kline_sync_service import start_daily_kline_scheduler
+from runtime_state import init_runtime
 
 # ==================== 应用初始化1 ====================
 
@@ -54,6 +55,12 @@ alert_sender = AlertSender(config)
 
 # 创建监控器
 monitor = StockMonitor(config, data_fetcher, alert_checker, alert_sender, stock_data)
+init_runtime(
+    config=config,
+    stock_data=stock_data,
+    alert_checker=alert_checker,
+    alert_sender=alert_sender,
+)
 
 # ==================== 注册路由 ====================
 
@@ -63,7 +70,7 @@ register_routes(app)
 
 # ==================== 启动应用 ====================
 
-if __name__ == "__main__" or __name__ == 'app':
+if __name__ == "__main__":
     # 启动监控线程（开市时启用）
     monitor_thread = threading.Thread(target=monitor.start_monitoring, daemon=True)
     monitor_thread.start()

@@ -5,9 +5,9 @@ import logging
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
-from config.dbconfig import exeQuery
 from config.runtime_config import get_app_runtime_env, get_app_runtime_version
 from monitor.config.db_monitor import db_manager
+from runtime_state import get_config, get_stock_data
 from utils.common import format_stock_code
 from services.stock_screen_service import screen_stocks_by_mv_and_pct
 from services.daily_kline_sync_service import (
@@ -67,7 +67,7 @@ def get_version():
 def get_stock_list():
     """获取股票列表"""
     stocks = "select * from stocks order by id desc"
-    result = exeQuery(stocks) or []
+    result = db_manager.execute_query(stocks) or []
 
     for stock in result:
         stock['stock_code'] = format_stock_code(stock['stock_code'], 'prefix')
@@ -124,7 +124,8 @@ def screen_mv_pct():
 @stock_bp.route('/reload_config')
 def reload_config():
     """重新加载配置"""
-    from app import config, stock_data
+    config = get_config()
+    stock_data = get_stock_data()
     config.reload_config()
     stock_data.initialize_data_storage()
     return jsonify({'success': True, 'message': '配置重载成功'})
