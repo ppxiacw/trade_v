@@ -9,7 +9,10 @@ from config.runtime_config import get_app_runtime_env, get_app_runtime_version
 from monitor.config.db_monitor import db_manager
 from runtime_state import get_config, get_stock_data
 from utils.common import format_stock_code
-from services.stock_screen_service import screen_stocks_by_mv_and_pct
+from services.stock_screen_service import (
+    screen_stocks_by_mv_and_pct,
+    load_future_events_by_stock_codes,
+)
 from services.daily_kline_sync_service import (
     start_daily_kline_full_sync,
     start_daily_kline_incremental_sync,
@@ -118,6 +121,33 @@ def screen_mv_pct():
         return jsonify({
             'success': False,
             'message': f'{hint} 详情: {str(e)}',
+        }), 503
+
+
+@stock_bp.route('/screen/future_events', methods=['POST'])
+def screen_future_events():
+    """
+    为筛选页按股票批量补充“今日及之后”的公司大事提醒。
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        stock_codes = payload.get('stock_codes') or []
+        if not isinstance(stock_codes, list):
+            return jsonify({'success': False, 'message': 'stock_codes 必须为数组'}), 400
+        if len(stock_codes) > 200:
+            return jsonify({'success': False, 'message': '单次最多请求 200 只股票'}), 400
+
+        data, meta = load_future_events_by_stock_codes(stock_codes)
+        return jsonify({
+            'success': True,
+            'data': data,
+            'meta': meta,
+        })
+    except Exception as e:
+        _logger.exception('screen_future_events 失败')
+        return jsonify({
+            'success': False,
+            'message': f'未来事件补充失败，请稍后重试。详情: {str(e)}',
         }), 503
 
 

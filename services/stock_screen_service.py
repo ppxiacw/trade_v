@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -55,6 +56,14 @@ _THS_PROFILE_CACHE: Dict[str, Dict[str, Any]] = {}
 _THS_PROFILE_ITEM_TTL_SECONDS = 6 * 60 * 60
 _THS_PROFILE_FALLBACK_FETCH_CAP = 160
 _THS_CONCEPT_MAX_ITEMS = 8
+_NOTICE_ITEM_CACHE: Dict[str, Dict[str, Any]] = {}
+_NOTICE_ITEM_TTL_SECONDS = 30 * 60
+_NOTICE_BATCH_SIZE = 20
+_NOTICE_PAGE_SIZE = 100
+_NOTICE_MAX_PAGES = 2
+_FUTURE_EVENT_CACHE: Dict[str, Dict[str, Any]] = {}
+_FUTURE_EVENT_ITEM_TTL_SECONDS = 60 * 60
+_FUTURE_EVENT_FETCH_MAX_WORKERS = 6
 
 
 def _disable_proxy_for_requests() -> None:
@@ -274,6 +283,82 @@ def _clean_html_text(raw: str) -> str:
     return text
 
 
+def _format_notice_date(raw: Any) -> Optional[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if len(text) >= 10:
+        return text[:10]
+    return text or None
+
+
+def _normalize_notice_title(title: str, short_name: str = "") -> str:
+    text = str(title or "").strip()
+    if not text:
+        return ""
+
+    text = re.sub(r"\s+", " ", text)
+    if "：" in text:
+        prefix, rest = text.split("：", 1)
+        if short_name and prefix.strip() == short_name.strip():
+            text = rest.strip()
+    elif ":" in text:
+        prefix, rest = text.split(":", 1)
+        if short_name and prefix.strip() == short_name.strip():
+            text = rest.strip()
+
+    return text.strip()
+
+
+def _classify_notice_event(title: str, column_name: str) -> Tuple[int, str]:
+    text = f"{column_name} {title}"
+
+    if any(keyword in text for keyword in ("年度报告", "年报", "半年度报告", "半年报", "季报", "一季报", "三季报")):
+        return 100, "财报"
+    if any(keyword in text for keyword in ("业绩预告", "业绩快报", "业绩说明会", "业绩")):
+        return 95, "业绩"
+    if any(keyword in text for keyword in ("分红", "利润分配", "权益分派", "派息")):
+        return 88, "分红"
+    if any(keyword in text for keyword in ("回购", "增持", "减持")):
+        return 82, "回购"
+    if any(keyword in text for keyword in ("重组", "并购", "收购", "重大资产")):
+        return 78, "重组"
+    if any(keyword in text for keyword in ("停牌", "复牌", "异常波动", "风险提示")):
+        return 74, "事项"
+    if any(keyword in text for keyword in ("投资者关系", "活动记录", "调研")):
+        return 40, "互动"
+
+    column_clean = str(column_name or "").strip()
+    return 55, column_clean or "公告"
+
+
+def _build_notice_item_payload(item: dict) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, dict):
+        return None
+
+    codes = item.get("codes") or []
+    code_info = codes[0] if isinstance(codes, list) and codes else {}
+    short_name = str((code_info or {}).get("short_name") or "").strip()
+    title_raw = str(item.get("title_ch") or item.get("title") or "").strip()
+    title = _normalize_notice_title(title_raw, short_name)
+    if not title:
+        return None
+
+    column_info = (item.get("columns") or [{}])[0] or {}
+    column_name = str(column_info.get("column_name") or "").strip()
+    notice_date = _format_notice_date(item.get("notice_date") or item.get("sort_date"))
+    score, event_type = _classify_notice_event(title, column_name)
+    sort_key = str(item.get("sort_date") or item.get("notice_date") or "")
+
+    return {
+        "latest_event_date": notice_date,
+        "latest_event_title": title,
+        "latest_event_type": event_type,
+        "_score": score,
+        "_sort_key": sort_key,
+    }
+
+
 def _parse_ths_board(field_html: str) -> Optional[str]:
     m = re.search(
         r"三级行业分类：\s*<span[^>]*>(.*?)</span>",
@@ -381,6 +466,422 @@ def _load_ths_profile_map(ts_codes: List[str], fetch_cap: int = _THS_PROFILE_FAL
             out[ts_code] = profile
 
     return out
+
+
+def _fetch_notice_batch(pure_codes: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    if not pure_codes:
+        return {}
+
+    expected = {str(code or "").strip().zfill(6) for code in pure_codes if str(code or "").strip()}
+    if not expected:
+        return {}
+
+    fallback_map: Dict[str, Dict[str, Any]] = {}
+    best_map: Dict[str, Dict[str, Any]] = {}
+
+    session = requests.Session()
+    session.trust_env = False
+    _disable_proxy_for_requests()
+
+    for page_index in range(1, _NOTICE_MAX_PAGES + 1):
+        params = {
+            "ann_type": "A",
+            "client_source": "web",
+            "page_index": page_index,
+            "page_size": _NOTICE_PAGE_SIZE,
+            "sr": -1,
+            "stock_list": ",".join(sorted(expected)),
+        }
+
+        notice_list: List[dict] = []
+        last_err: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                resp = session.get(
+                    "https://np-anotice-stock.eastmoney.com/api/security/ann",
+                    params=params,
+                    headers=_EM_HEADERS,
+                    timeout=18,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                notice_list = (((data or {}).get("data") or {}).get("list")) or []
+                if not isinstance(notice_list, list):
+                    notice_list = []
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(0.4 * (attempt + 1))
+        else:
+            logger.warning("东方财富公告批量拉取失败 codes=%s err=%s", list(expected)[:3], last_err)
+            break
+
+        if not notice_list:
+            break
+
+        for item in notice_list:
+            payload = _build_notice_item_payload(item)
+            if not payload:
+                continue
+            for code_info in item.get("codes") or []:
+                pure_code = str((code_info or {}).get("stock_code") or "").strip().zfill(6)
+                if pure_code not in expected:
+                    continue
+                fallback_map.setdefault(pure_code, payload)
+                current = best_map.get(pure_code)
+                if current is None:
+                    best_map[pure_code] = payload
+                    continue
+                if payload["_score"] > current["_score"]:
+                    best_map[pure_code] = payload
+                    continue
+                if payload["_score"] == current["_score"] and payload["_sort_key"] > current["_sort_key"]:
+                    best_map[pure_code] = payload
+
+        if expected.issubset(fallback_map.keys()):
+            all_priority_enough = all(
+                (best_map.get(pure_code) or {}).get("_score", 0) >= 82 for pure_code in expected
+            )
+            if all_priority_enough:
+                break
+
+    result: Dict[str, Dict[str, Optional[str]]] = {}
+    for pure_code in expected:
+        item = best_map.get(pure_code) or fallback_map.get(pure_code) or {}
+        result[pure_code] = {
+            "latest_event_date": item.get("latest_event_date"),
+            "latest_event_title": item.get("latest_event_title"),
+            "latest_event_type": item.get("latest_event_type"),
+        }
+    return result
+
+
+def _load_latest_notice_map(ts_codes: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    if not ts_codes:
+        return {}
+
+    now = time.time()
+    result: Dict[str, Dict[str, Optional[str]]] = {}
+    pending_pure_codes: List[str] = []
+    ts_code_to_pure_code: Dict[str, str] = {}
+
+    for ts_code in list(dict.fromkeys(ts_codes)):
+        pure_code = str(ts_code or "").split(".")[0].strip().zfill(6)
+        if not pure_code:
+            continue
+        ts_code_to_pure_code[ts_code] = pure_code
+        cache_item = _NOTICE_ITEM_CACHE.get(pure_code) or {}
+        updated_at = float(cache_item.get("updated_at", 0) or 0)
+        if now - updated_at < _NOTICE_ITEM_TTL_SECONDS:
+            result[ts_code] = {
+                "latest_event_date": cache_item.get("latest_event_date"),
+                "latest_event_title": cache_item.get("latest_event_title"),
+                "latest_event_type": cache_item.get("latest_event_type"),
+            }
+        else:
+            pending_pure_codes.append(pure_code)
+
+    unique_pending = list(dict.fromkeys(pending_pure_codes))
+    if unique_pending:
+        batches = [
+            unique_pending[i : i + _NOTICE_BATCH_SIZE]
+            for i in range(0, len(unique_pending), _NOTICE_BATCH_SIZE)
+        ]
+        max_workers = min(4, max(1, len(batches)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_batch = {
+                executor.submit(_fetch_notice_batch, batch): batch for batch in batches
+            }
+            for future in as_completed(future_to_batch):
+                batch_result = future.result() or {}
+                fetched_at = time.time()
+                for pure_code in future_to_batch[future]:
+                    payload = batch_result.get(pure_code) or {
+                        "latest_event_date": None,
+                        "latest_event_title": None,
+                        "latest_event_type": None,
+                    }
+                    _NOTICE_ITEM_CACHE[pure_code] = {
+                        "updated_at": fetched_at,
+                        "latest_event_date": payload.get("latest_event_date"),
+                        "latest_event_title": payload.get("latest_event_title"),
+                        "latest_event_type": payload.get("latest_event_type"),
+                    }
+
+    for ts_code, pure_code in ts_code_to_pure_code.items():
+        if ts_code in result:
+            continue
+        cache_item = _NOTICE_ITEM_CACHE.get(pure_code) or {}
+        result[ts_code] = {
+            "latest_event_date": cache_item.get("latest_event_date"),
+            "latest_event_title": cache_item.get("latest_event_title"),
+            "latest_event_type": cache_item.get("latest_event_type"),
+        }
+
+    return result
+
+
+def _stock_code_to_pure_code(stock_code: str) -> Optional[str]:
+    code = str(stock_code or "").strip()
+    if not code:
+        return None
+
+    prefix_match = re.fullmatch(r"(sh|sz|bj)(\d{1,6})", code, flags=re.I)
+    if prefix_match:
+        return str(prefix_match.group(2) or "").zfill(6)
+
+    suffix_match = re.fullmatch(r"(\d{1,6})\.(SH|SZ|BJ)", code, flags=re.I)
+    if suffix_match:
+        return str(suffix_match.group(1) or "").zfill(6)
+
+    if code.isdigit():
+        return code.zfill(6)
+
+    return None
+
+
+def _pure_code_to_prefix_code(pure_code: str) -> str:
+    pure = str(pure_code or "").strip().zfill(6)
+    if pure.startswith(("8", "4")):
+        return f"bj{pure}"
+    if pure.startswith("6"):
+        return f"sh{pure}"
+    return f"sz{pure}"
+
+
+def _extract_json_object_after_marker(text: str, marker: str) -> Optional[str]:
+    if not text or not marker:
+        return None
+
+    marker_index = text.find(marker)
+    if marker_index < 0:
+        return None
+
+    start = text.find("{", marker_index)
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+
+    return None
+
+
+def _normalize_future_event_text(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _score_future_event(event_type: str, content: str) -> int:
+    text = f"{event_type} {content}"
+
+    if any(keyword in text for keyword in ("预约披露", "年报", "半年报", "季报", "一季报", "三季报", "定期报告")):
+        return 100
+    if any(keyword in text for keyword in ("业绩预告", "业绩快报", "业绩说明会", "业绩")):
+        return 95
+    if any(keyword in text for keyword in ("股东大会", "董事会", "监事会")):
+        return 88
+    if any(keyword in text for keyword in ("解禁", "限售")):
+        return 86
+    if any(keyword in text for keyword in ("分红", "派息", "权益分派", "利润分配", "送转")):
+        return 84
+    if any(keyword in text for keyword in ("回购", "增持", "减持")):
+        return 82
+    if any(keyword in text for keyword in ("重组", "并购", "收购", "重大资产")):
+        return 80
+    if any(keyword in text for keyword in ("停牌", "复牌", "异常波动", "风险提示")):
+        return 76
+    if any(keyword in text for keyword in ("公告", "提示性公告")):
+        return 64
+    if any(keyword in text for keyword in ("调研", "投资者关系", "活动记录", "研报")):
+        return 48
+    if any(keyword in text for keyword in ("融资融券", "大宗交易", "股权质押")):
+        return 20
+    return 52
+
+
+def _build_future_event_payload(item: dict, today_str: str) -> Optional[Dict[str, Any]]:
+    if not isinstance(item, dict):
+        return None
+
+    event_date = _format_notice_date(item.get("NOTICE_DATE"))
+    if not event_date or event_date < today_str:
+        return None
+
+    event_type = _normalize_future_event_text(item.get("EVENT_TYPE") or "")
+    event_title = _normalize_future_event_text(item.get("LEVEL1_CONTENT") or "")
+    if not event_type and not event_title:
+        return None
+    if not event_title:
+        event_title = event_type
+    if not event_type:
+        event_type = "事项"
+
+    return {
+        "event_date": event_date,
+        "event_type": event_type,
+        "event_title": event_title,
+        "_score": _score_future_event(event_type, event_title),
+    }
+
+
+def _fetch_future_events_for_pure_code(pure_code: str) -> List[Dict[str, str]]:
+    pure = str(pure_code or "").strip().zfill(6)
+    if not pure.isdigit():
+        return []
+
+    session = requests.Session()
+    session.trust_env = False
+    _disable_proxy_for_requests()
+
+    try:
+        resp = session.get(
+            f"https://data.eastmoney.com/stockcalendar/{pure}.html",
+            headers=_EM_HEADERS,
+            timeout=18,
+        )
+        resp.raise_for_status()
+        html = resp.content.decode("utf-8", errors="replace")
+        json_text = _extract_json_object_after_marker(html, "var pagedata =")
+        if not json_text:
+            return []
+        page_data = json.loads(json_text)
+        rows = ((((page_data or {}).get("sjyl") or {}).get("result") or {}).get("data")) or []
+        if not isinstance(rows, list):
+            return []
+    except Exception as e:
+        logger.warning("东方财富个股日历拉取失败 stock=%s err=%s", pure, e)
+        return []
+
+    tz_cn = timezone(timedelta(hours=8))
+    today_str = datetime.now(tz_cn).strftime("%Y-%m-%d")
+    events: List[Dict[str, Any]] = []
+    seen = set()
+    for item in rows:
+        payload = _build_future_event_payload(item, today_str)
+        if not payload:
+            continue
+        dedupe_key = (
+            payload.get("event_date"),
+            payload.get("event_type"),
+            payload.get("event_title"),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        events.append(payload)
+
+    events.sort(
+        key=lambda item: (
+            item.get("event_date") or "9999-12-31",
+            -int(item.get("_score", 0) or 0),
+            str(item.get("event_type") or ""),
+            str(item.get("event_title") or ""),
+        )
+    )
+
+    return [
+        {
+            "event_date": str(item.get("event_date") or ""),
+            "event_type": str(item.get("event_type") or ""),
+            "event_title": str(item.get("event_title") or ""),
+        }
+        for item in events
+    ]
+
+
+def load_future_events_by_stock_codes(stock_codes: List[str]) -> Tuple[Dict[str, List[Dict[str, str]]], dict]:
+    if not stock_codes:
+        return {}, {"requested": 0, "filled_codes": 0, "total_events": 0}
+
+    now = time.time()
+    key_to_pure: Dict[str, str] = {}
+    pure_to_keys: Dict[str, List[str]] = {}
+    for stock_code in stock_codes:
+        pure_code = _stock_code_to_pure_code(str(stock_code or ""))
+        if not pure_code:
+            continue
+        key = _pure_code_to_prefix_code(pure_code)
+        key_to_pure[key] = pure_code
+        pure_to_keys.setdefault(pure_code, [])
+        if key not in pure_to_keys[pure_code]:
+            pure_to_keys[pure_code].append(key)
+
+    result_by_pure: Dict[str, List[Dict[str, str]]] = {}
+    pending_pure_codes: List[str] = []
+    for pure_code in pure_to_keys.keys():
+        cache_item = _FUTURE_EVENT_CACHE.get(pure_code) or {}
+        updated_at = float(cache_item.get("updated_at", 0) or 0)
+        if now - updated_at < _FUTURE_EVENT_ITEM_TTL_SECONDS:
+            cached_events = cache_item.get("events")
+            result_by_pure[pure_code] = list(cached_events or [])
+        else:
+            pending_pure_codes.append(pure_code)
+
+    if pending_pure_codes:
+        max_workers = min(_FUTURE_EVENT_FETCH_MAX_WORKERS, max(1, len(pending_pure_codes)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_code = {
+                executor.submit(_fetch_future_events_for_pure_code, pure_code): pure_code
+                for pure_code in pending_pure_codes
+            }
+            for future in as_completed(future_to_code):
+                pure_code = future_to_code[future]
+                try:
+                    events = future.result() or []
+                except Exception as e:
+                    logger.warning("未来事件任务失败 stock=%s err=%s", pure_code, e)
+                    events = []
+                result_by_pure[pure_code] = list(events)
+                _FUTURE_EVENT_CACHE[pure_code] = {
+                    "updated_at": time.time(),
+                    "events": list(events),
+                }
+
+    data: Dict[str, List[Dict[str, str]]] = {}
+    filled_codes = 0
+    total_events = 0
+    for pure_code, keys in pure_to_keys.items():
+        events = list(result_by_pure.get(pure_code) or [])
+        if events:
+            filled_codes += len(keys)
+            total_events += len(events) * len(keys)
+        for key in keys:
+            data[key] = list(events)
+
+    tz_cn = timezone(timedelta(hours=8))
+    return data, {
+        "requested": len(key_to_pure),
+        "filled_codes": filled_codes,
+        "total_events": total_events,
+        "from_date": datetime.now(tz_cn).strftime("%Y-%m-%d"),
+        "source": "Eastmoney stock calendar",
+    }
 
 
 def _load_universe() -> List[Tuple[str, str, str]]:
@@ -541,6 +1042,7 @@ def screen_stocks_by_mv_and_pct(
                 "turnover_rate": round(turnover_rate, 4) if turnover_rate is not None else None,
                 "board": board,
                 "concept": concept,
+                "future_events": [],
                 "volume": None,
                 "amount": None,
             }
