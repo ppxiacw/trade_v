@@ -80,16 +80,18 @@ def get_stock_list():
 @stock_bp.route('/screen/mv_pct', methods=['GET'])
 def screen_mv_pct():
     """
-    实时筛选：总市值 >= 指定亿元，且涨跌幅 >= 指定 %（腾讯 qt.gtimg.cn，与 K 线腾讯源一致）。
+    市值+涨幅筛选：支持实时模式与历史日期模式。
     查询参数：
       min_mv_yi: 最小总市值（亿元），默认 50
       min_pct_chg: 最小涨跌幅（%），默认 0
       limit: 最大返回条数，默认 3000，最大 8000
+      trade_date: 可选，历史日期（YYYY-MM-DD / YYYYMMDD）
     """
     try:
         min_mv_yi = request.args.get('min_mv_yi', default=50.0, type=float)
         min_pct_chg = request.args.get('min_pct_chg', default=0.0, type=float)
         limit = request.args.get('limit', default=3000, type=int)
+        trade_date = (request.args.get('trade_date', default='', type=str) or '').strip()
 
         if min_mv_yi < 0:
             return jsonify({'success': False, 'message': 'min_mv_yi 不能为负数'}), 400
@@ -100,6 +102,7 @@ def screen_mv_pct():
             min_mv_yi=min_mv_yi,
             min_pct_chg=min_pct_chg,
             limit=limit,
+            trade_date=trade_date or None,
         )
         return jsonify({
             'success': True,
@@ -110,8 +113,11 @@ def screen_mv_pct():
                 'min_mv_yi': min_mv_yi,
                 'min_pct_chg': min_pct_chg,
                 'limit': limit,
+                'trade_date': trade_date or None,
             },
         })
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
     except Exception as e:
         _logger.exception('screen_mv_pct 失败')
         hint = (

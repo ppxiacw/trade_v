@@ -11,7 +11,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -892,6 +892,14 @@ def _load_universe() -> List[Tuple[str, str, str]]:
     try:
         from utils import GetStockData
 
+        # GetStockData 已改为延迟加载，这里主动触发一次，确保筛选页拿到全市场代码池。
+        lazy_loader = getattr(GetStockData, "_load_result_dict_once", None)
+        if callable(lazy_loader):
+            try:
+                lazy_loader()
+            except Exception as e:
+                logger.warning("触发 GetStockData 代码池延迟加载失败: %s", e)
+
         result_map = getattr(GetStockData, "result", {}) or {}
         for ts_code, info in result_map.items():
             if _is_star_market_board(ts_code):
@@ -951,6 +959,16 @@ def _parse_gtimg_response(text: str) -> List[dict]:
     return out
 
 
+def _fetch_gtimg_symbols_once(session: requests.Session, symbols: List[str], timeout: int = 25) -> Optional[List[dict]]:
+    if not symbols:
+        return []
+    url = "https://qt.gtimg.cn/q=" + ",".join(symbols)
+    r = session.get(url, headers=_GTIMG_HEADERS, timeout=timeout)
+    r.raise_for_status()
+    text = r.content.decode("gbk", errors="replace")
+    return _parse_gtimg_response(text)
+
+
 def _fetch_gtimg_batches(symbols: List[str], batch_size: int = 80) -> List[dict]:
     _disable_proxy_for_requests()
     all_rows: List[dict] = []
@@ -963,35 +981,232 @@ def _fetch_gtimg_batches(symbols: List[str], batch_size: int = 80) -> List[dict]
         last_err: Optional[Exception] = None
         for attempt in range(4):
             try:
-                r = session.get(url, headers=_GTIMG_HEADERS, timeout=25)
-                r.raise_for_status()
-                text = r.content.decode("gbk", errors="replace")
-                all_rows.extend(_parse_gtimg_response(text))
+                all_rows.extend(_fetch_gtimg_symbols_once(session, batch, timeout=25) or [])
                 break
             except Exception as e:
                 last_err = e
                 time.sleep(0.6 * (2**attempt) + 0.1)
         else:
             logger.warning("腾讯行情批次失败 symbols=%s.. err=%s", batch[:3], last_err)
+            # 降级补拉：按小批次甚至单票兜底，避免整批缺失导致筛选漏票。
+            for j in range(0, len(batch), 10):
+                mini = batch[j : j + 10]
+                mini_ok = False
+                for mini_attempt in range(3):
+                    try:
+                        all_rows.extend(_fetch_gtimg_symbols_once(session, mini, timeout=15) or [])
+                        mini_ok = True
+                        break
+                    except Exception:
+                        time.sleep(0.35 * (mini_attempt + 1))
+                if mini_ok:
+                    continue
+                for sym in mini:
+                    single_ok = False
+                    for single_attempt in range(2):
+                        try:
+                            all_rows.extend(_fetch_gtimg_symbols_once(session, [sym], timeout=12) or [])
+                            single_ok = True
+                            break
+                        except Exception:
+                            time.sleep(0.25 * (single_attempt + 1))
+                    if not single_ok:
+                        logger.warning("腾讯行情单票兜底失败 symbol=%s", sym)
         time.sleep(0.06)
-    return all_rows
+    dedup: Dict[str, dict] = {}
+    for item in all_rows:
+        sym = str(item.get("gtimg_symbol") or "").strip().lower()
+        if not sym:
+            continue
+        dedup[sym] = item
+    return list(dedup.values())
+
+
+def _parse_trade_date_input(trade_date: Optional[str]) -> Optional[date]:
+    text = str(trade_date or "").strip()
+    if not text:
+        return None
+
+    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError("trade_date 格式需为 YYYY-MM-DD 或 YYYYMMDD")
+
+
+def _resolve_effective_trade_date(requested_date: date) -> Optional[date]:
+    rows = exeQuery(
+        "SELECT MAX(trade_date) AS trade_date FROM stock_daily_kline WHERE trade_date <= %s",
+        (requested_date,),
+    ) or []
+    raw = (rows[0] or {}).get("trade_date") if rows else None
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw.date()
+    if hasattr(raw, "isoformat"):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    return datetime.strptime(text[:10], "%Y-%m-%d").date()
+
+
+def _load_daily_snapshot_map(trade_date: date) -> Dict[str, dict]:
+    rows = exeQuery(
+        """
+        SELECT ts_code, close, pre_close, pct_chg, change_amount, turnover_rate, vol, amount
+        FROM stock_daily_kline
+        WHERE trade_date = %s
+        """,
+        (trade_date,),
+    ) or []
+
+    out: Dict[str, dict] = {}
+    for item in rows:
+        ts_code = str(item.get("ts_code") or "").strip().upper()
+        if not ts_code:
+            continue
+        close = _safe_float(item.get("close"))
+        pre_close = _safe_float(item.get("pre_close"))
+        pct_chg = _safe_float(item.get("pct_chg"))
+        change_amount = _safe_float(item.get("change_amount"))
+        if pct_chg is None and close is not None and pre_close is not None and pre_close != 0:
+            pct_chg = ((close - pre_close) / pre_close) * 100
+        if change_amount is None and close is not None and pre_close is not None:
+            change_amount = close - pre_close
+
+        out[ts_code] = {
+            "close": close,
+            "pct_chg": pct_chg,
+            "change_amount": change_amount,
+            "turnover_rate": _safe_float(item.get("turnover_rate")),
+            "vol": _safe_float(item.get("vol")),
+            "amount": _safe_float(item.get("amount")),
+            "pre_close": pre_close,
+            "pct_recomputed": False,
+        }
+
+    if not out:
+        return out
+
+    ts_codes = list(out.keys())
+    prev_close_map: Dict[str, float] = {}
+    chunk_size = 600
+    for i in range(0, len(ts_codes), chunk_size):
+        chunk_codes = ts_codes[i : i + chunk_size]
+        if not chunk_codes:
+            continue
+        placeholders = ", ".join(["%s"] * len(chunk_codes))
+        query = f"""
+            SELECT t.ts_code, t.close
+            FROM stock_daily_kline t
+            INNER JOIN (
+                SELECT ts_code, MAX(trade_date) AS prev_trade_date
+                FROM stock_daily_kline
+                WHERE trade_date < %s
+                  AND ts_code IN ({placeholders})
+                GROUP BY ts_code
+            ) p
+              ON p.ts_code = t.ts_code
+             AND p.prev_trade_date = t.trade_date
+        """
+        params = (trade_date, *chunk_codes)
+        prev_rows = exeQuery(query, params) or []
+        for prev in prev_rows:
+            ts = str(prev.get("ts_code") or "").strip().upper()
+            close_val = _safe_float(prev.get("close"))
+            if ts and close_val is not None and close_val > 0:
+                prev_close_map[ts] = close_val
+
+    # 用前一交易日收盘价重算涨跌幅，避免历史数据中 pre_close 异常造成漏筛。
+    for ts_code, snap in out.items():
+        close = _safe_float(snap.get("close"))
+        prev_close_ref = _safe_float(prev_close_map.get(ts_code))
+        if close is None or prev_close_ref is None or prev_close_ref <= 0:
+            continue
+        change_amount = close - prev_close_ref
+        pct_chg = (change_amount / prev_close_ref) * 100
+        snap["pre_close"] = prev_close_ref
+        snap["change_amount"] = change_amount
+        snap["pct_chg"] = pct_chg
+        snap["pct_recomputed"] = True
+    return out
+
+
+def _estimate_historical_mv_yi(current_mv_yi: Optional[float], current_price: Optional[float], historical_close: Optional[float]) -> Optional[float]:
+    if current_mv_yi is None or current_price is None or historical_close is None:
+        return None
+    if current_price <= 0:
+        return None
+    return float(current_mv_yi) * float(historical_close) / float(current_price)
 
 
 def screen_stocks_by_mv_and_pct(
     min_mv_yi: float,
     min_pct_chg: float,
     limit: int = 3000,
+    trade_date: Optional[str] = None,
 ) -> Tuple[List[dict], dict]:
-    universe = _load_universe()
-    if not universe:
-        raise RuntimeError(
-            "股票代码池为空（GetStockData/数据库stocks/东方财富接口均不可用）。"
-            "请检查服务网络、数据库连接与启动日志。"
-        )
+    requested_trade_date = _parse_trade_date_input(trade_date)
+    effective_trade_date = None
+    daily_snapshot_map: Dict[str, dict] = {}
+    sym_to_meta: Dict[str, Tuple[str, str]] = {}
+    symbols: List[str] = []
 
-    sym_to_meta = {u[0]: (u[1], u[2]) for u in universe}
+    if requested_trade_date is None:
+        universe = _load_universe()
+        if not universe:
+            raise RuntimeError(
+                "股票代码池为空（GetStockData/数据库stocks/东方财富接口均不可用）。"
+                "请检查服务网络、数据库连接与启动日志。"
+            )
+        sym_to_meta = {u[0]: (u[1], u[2]) for u in universe}
+        symbols = list(sym_to_meta.keys())
+    else:
+        # 历史模式：以日K表当日股票池为准，避免因代码池不全导致漏票。
+        # 名称优先用全市场代码表补齐，失败时再用实时行情返回名。
+        name_hint_by_ts: Dict[str, str] = {}
+        try:
+            for _, ts_code, stock_name in _load_universe():
+                ts = str(ts_code or "").strip().upper()
+                if not ts:
+                    continue
+                if ts not in name_hint_by_ts and stock_name:
+                    name_hint_by_ts[ts] = str(stock_name).strip()
+        except Exception as e:
+            logger.warning("历史模式加载名称提示失败: %s", e)
+
+        effective_trade_date = _resolve_effective_trade_date(requested_trade_date)
+        if effective_trade_date is None:
+            raise RuntimeError(
+                "历史日期筛选失败：stock_daily_kline 无可用数据。"
+                "请先执行 /api/daily_kline/sync_full 或 /api/daily_kline/sync_incremental。"
+            )
+        daily_snapshot_map = _load_daily_snapshot_map(effective_trade_date)
+        if not daily_snapshot_map:
+            raise RuntimeError(
+                f"历史日期筛选失败：{effective_trade_date.isoformat()} 无日K数据。"
+                "请先执行日K同步。"
+            )
+        for ts_code in daily_snapshot_map.keys():
+            ts = str(ts_code or "").strip().upper()
+            if not ts or _is_star_market_board(ts):
+                continue
+            sym = ts_to_gtimg_symbol(ts)
+            if not sym:
+                continue
+            if sym in sym_to_meta:
+                continue
+            sym_to_meta[sym] = (ts, name_hint_by_ts.get(ts, ""))
+        symbols = list(sym_to_meta.keys())
+        if not symbols:
+            raise RuntimeError(
+                f"历史日期筛选失败：{effective_trade_date.isoformat()} 未找到可用股票代码。"
+            )
+
     em_profile_map = _load_em_profile_map()
-    symbols = list(sym_to_meta.keys())
 
     tz_cn = timezone(timedelta(hours=8))
     fetched_at = datetime.now(tz_cn).isoformat(timespec="seconds")
@@ -1002,10 +1217,15 @@ def screen_stocks_by_mv_and_pct(
 
     rows: List[dict] = []
     row_ts_codes: List[str] = []
+    historical_mv_estimated_count = 0
+    historical_daily_matched_count = 0
+    historical_pct_recomputed_count = 0
+    matched_quote_symbols: set[str] = set()
     for q in quotes:
         gsym = q.get("gtimg_symbol")
         if not gsym or gsym not in sym_to_meta:
             continue
+        matched_quote_symbols.add(str(gsym).lower())
         ts_code, name_hint = sym_to_meta[gsym]
         if _is_star_market_board(ts_code):
             continue
@@ -1017,6 +1237,34 @@ def screen_stocks_by_mv_and_pct(
 
         mv_yi = q.get("total_mv_yi")
         pct = q.get("pct_chg")
+        price = q.get("price")
+        change_amount = q.get("change_amount")
+        turnover_rate = q.get("turnover_rate")
+        volume = None
+        amount = None
+
+        if effective_trade_date is not None:
+            daily = daily_snapshot_map.get(ts_code.upper())
+            if not daily:
+                continue
+            historical_daily_matched_count += 1
+            if daily.get("pct_recomputed"):
+                historical_pct_recomputed_count += 1
+            price = daily.get("close")
+            pct = daily.get("pct_chg")
+            change_amount = daily.get("change_amount")
+            turnover_rate = daily.get("turnover_rate")
+            volume = daily.get("vol")
+            amount = daily.get("amount")
+            estimated_mv = _estimate_historical_mv_yi(
+                current_mv_yi=q.get("total_mv_yi"),
+                current_price=q.get("price"),
+                historical_close=daily.get("close"),
+            )
+            if estimated_mv is not None:
+                historical_mv_estimated_count += 1
+            mv_yi = estimated_mv
+
         if mv_yi is None or pct is None:
             continue
         if mv_yi < float(min_mv_yi) or pct < float(min_pct_chg):
@@ -1028,23 +1276,22 @@ def screen_stocks_by_mv_and_pct(
         profile = em_profile_map.get(ts_code) or {}
         board = profile.get("board")
         concept = profile.get("concept")
-        turnover_rate = q.get("turnover_rate")
 
         rows.append(
             {
                 "stock_code": stock_code,
                 "stock_name": nm,
-                "price": q.get("price"),
+                "price": price,
                 "pct_chg": pct,
-                "change_amount": q.get("change_amount"),
+                "change_amount": change_amount,
                 "total_mv_yi": round(mv_yi, 4),
                 "float_mv_yi": float_mv_yi,
                 "turnover_rate": round(turnover_rate, 4) if turnover_rate is not None else None,
                 "board": board,
                 "concept": concept,
                 "future_events": [],
-                "volume": None,
-                "amount": None,
+                "volume": volume,
+                "amount": amount,
             }
         )
         row_ts_codes.append(ts_code)
@@ -1081,15 +1328,40 @@ def screen_stocks_by_mv_and_pct(
             if ((not board_before and row.get("board")) or (not concept_before and row.get("concept"))):
                 ths_fallback_filled += 1
 
-    meta = {
+    meta: Dict[str, Any] = {
         "fetched_at": fetched_at,
         "source": "qt.gtimg.cn (Tencent, same vendor family as K-line fqkline)",
         "universe_size": len(symbols),
         "quotes_parsed": len(quotes),
+        "quote_symbols_requested": len(symbols),
+        "quote_symbols_matched": len(matched_quote_symbols),
+        "quote_symbols_missing": max(0, len(symbols) - len(matched_quote_symbols)),
         "total_after_filter": len(rows),
         "em_profile_non_empty": em_profile_non_empty,
         "ths_fallback_filled": ths_fallback_filled,
         "exclude_star_board": True,
         "exclude_note": "已排除科创板（代码 688 开头）",
     }
+    if effective_trade_date is None:
+        meta["mode"] = "realtime"
+    else:
+        meta.update(
+            {
+                "mode": "historical",
+                "requested_trade_date": requested_trade_date.isoformat() if requested_trade_date else "",
+                "effective_trade_date": effective_trade_date.isoformat(),
+                "daily_rows_available": len(daily_snapshot_map),
+                "daily_rows_matched_quote": historical_daily_matched_count,
+                "historical_mv_estimated_count": historical_mv_estimated_count,
+                "historical_pct_recomputed_count": historical_pct_recomputed_count,
+                "source": (
+                    "stock_daily_kline + qt.gtimg.cn "
+                    "(历史涨跌幅/收盘价 + 当前总股本估算历史市值)"
+                ),
+                "historical_note": (
+                    "历史日期模式下，总市值按“当日收盘价 × 当前估算总股本”换算，"
+                    "为近似值。"
+                ),
+            }
+        )
     return rows, meta

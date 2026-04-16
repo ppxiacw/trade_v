@@ -242,7 +242,15 @@ def _fetch_single_stock_daily_from_tx_akshare(ts_code: str, start_date: Optional
     if not symbol:
         return pd.DataFrame()
 
-    query_start = start_date or "19000101"
+    start_dt: Optional[datetime] = None
+    query_start = "19000101"
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, "%Y%m%d")
+            # 预留前置窗口用于计算首日 pre_close，避免增量同步首日 pre_close 偏差。
+            query_start = (start_dt - timedelta(days=15)).strftime("%Y%m%d")
+        except Exception:
+            query_start = start_date
     df = ak.stock_zh_a_hist_tx(
         symbol=symbol,
         start_date=query_start,
@@ -288,6 +296,12 @@ def _fetch_single_stock_daily_from_tx_akshare(ts_code: str, start_date: Optional
     df["amplitude"] = ((df["high"] - df["low"]) / df["pre_close"]) * 100
     df["amount"] = None
     df["turnover_rate"] = None
+
+    if start_dt is not None:
+        df = df[df["trade_date"] >= start_dt]
+        if df.empty:
+            return df
+
     df["trade_date"] = df["trade_date"].dt.date
     df["ts_code"] = ts_code
     df["source"] = "akshare_tx_qfq"
@@ -421,12 +435,12 @@ def _fetch_single_stock_daily_from_tencent(ts_code: str, start_date: Optional[st
     if df.empty:
         return df
 
+    start_dt: Optional[datetime] = None
     if start_date:
         try:
             start_dt = datetime.strptime(start_date, "%Y%m%d")
-            df = df[df["trade_date"] >= start_dt]
         except Exception:
-            pass
+            start_dt = None
 
     for col in ("open", "close", "high", "low", "vol"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -444,6 +458,12 @@ def _fetch_single_stock_daily_from_tencent(ts_code: str, start_date: Optional[st
     df["amount"] = None
     df["turnover_rate"] = None
     df["amplitude"] = ((df["high"] - df["low"]) / df["pre_close"]) * 100
+
+    if start_dt is not None:
+        df = df[df["trade_date"] >= start_dt]
+        if df.empty:
+            return df
+
     df["trade_date"] = df["trade_date"].dt.date
     df["ts_code"] = ts_code
     df["source"] = "tencent_qfq"

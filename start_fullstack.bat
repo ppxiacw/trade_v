@@ -1,6 +1,21 @@
 @echo off
 setlocal EnableExtensions
 
+set "RESTART_MODE=0"
+if not "%~1"=="" (
+  if /I "%~1"=="restart" (
+    set "RESTART_MODE=1"
+  ) else if /I "%~1"=="-r" (
+    set "RESTART_MODE=1"
+  ) else if /I "%~1"=="--restart" (
+    set "RESTART_MODE=1"
+  ) else (
+    echo [ERROR] Unknown argument: %~1
+    echo Usage: %~nx0 [restart ^| -r ^| --restart]
+    exit /b 1
+  )
+)
+
 REM Script location (backend repo: trade_v)
 set "BACKEND_DIR=%~dp0"
 if "%BACKEND_DIR:~-1%"=="\" set "BACKEND_DIR=%BACKEND_DIR:~0,-1%"
@@ -103,6 +118,12 @@ if not exist "%FRONTEND_VITE_BIN%" (
   )
 )
 
+if "%RESTART_MODE%"=="1" (
+  echo [INFO] Restart mode enabled. Closing existing backend/frontend windows...
+  call :stop_named_windows
+  ping -n 2 127.0.0.1 >nul
+)
+
 echo [INFO] Cleaning previous local dev servers...
 call :stop_port_listener 5000
 call :stop_port_listener 5173
@@ -110,7 +131,9 @@ call :stop_port_listener 5174
 call :stop_port_listener 5175
 
 echo Starting backend...
-start "trade_v backend" cmd /k "cd /d ""%BACKEND_DIR%"" && title trade_v backend && ""%PYTHON_EXE%"" app.py"
+REM Use start /D + explicit executable/script paths to avoid cmd quoting edge-cases
+REM that may accidentally pass python.exe as a script argument.
+start "trade_v backend" /D "%BACKEND_DIR%" "%PYTHON_EXE%" "%BACKEND_DIR%\app.py"
 
 echo Starting frontend...
 start "trader_front frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && title trader_front frontend && npm run dev -- --port %FRONTEND_PORT% --strictPort"
@@ -118,17 +141,53 @@ start "trader_front frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && title trader_f
 echo Done. Two windows opened:
 echo - Backend:  http://127.0.0.1:5000
 echo - Frontend: http://127.0.0.1:%FRONTEND_PORT%
-echo [TIP] Script will stop old listeners on ports 5000/5173-5175 before each start.
+echo [TIP] Script always clears listeners on ports 5000/5173-5175.
+echo [TIP] Use "%~nx0 restart" to close existing service windows before relaunch.
 
 endlocal
 exit /b 0
 
+:stop_named_windows
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $procs = Get-Process; foreach($p in $procs){ if($p.MainWindowTitle -like 'trade_v backend*' -or $p.MainWindowTitle -like 'trader_front frontend*'){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
+exit /b 0
+
 :stop_port_listener
 set "TARGET_PORT=%~1"
-for /f "tokens=5" %%P in ('netstat -ano -p tcp ^| findstr /R /C:":%TARGET_PORT% .*LISTENING"') do (
-  if not "%%P"=="0" (
-    echo [INFO] Stopping PID %%P on port %TARGET_PORT%...
-    taskkill /F /PID %%P >nul 2>nul
-  )
+set "FOUND_PID=0"
+
+REM Preferred: powershell query is locale-independent and handles IPv4/IPv6.
+for /f %%P in ('powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-NetTCPConnection -State Listen -LocalPort %TARGET_PORT% | Select-Object -ExpandProperty OwningProcess -Unique" 2^>nul') do (
+  call :kill_pid_if_needed %%P %TARGET_PORT%
 )
+
+REM Fallback: netstat text matching (for environments without Get-NetTCPConnection).
+for /f "tokens=5" %%P in ('netstat -ano -p tcp ^| findstr /R /C:":%TARGET_PORT% .*LISTENING" /C:":%TARGET_PORT% .*LISTEN" /C:":%TARGET_PORT% .*侦听"') do (
+  call :kill_pid_if_needed %%P %TARGET_PORT%
+)
+
+call :wait_port_release %TARGET_PORT%
 exit /b 0
+
+:kill_pid_if_needed
+set "KILL_PID=%~1"
+set "KILL_PORT=%~2"
+if "%KILL_PID%"=="" exit /b 0
+if "%KILL_PID%"=="0" exit /b 0
+echo [INFO] Stopping PID %KILL_PID% on port %KILL_PORT%...
+set "FOUND_PID=1"
+taskkill /F /T /PID %KILL_PID% >nul 2>nul
+exit /b 0
+
+:wait_port_release
+set "WAIT_PORT=%~1"
+set /a "WAIT_TRIES=0"
+:wait_port_release_loop
+set /a "WAIT_TRIES+=1"
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $c=Get-NetTCPConnection -State Listen -LocalPort %WAIT_PORT% | Select-Object -First 1; if($c){exit 1}else{exit 0}" >nul 2>nul
+if not errorlevel 1 exit /b 0
+if %WAIT_TRIES% GEQ 10 (
+  echo [WARN] Port %WAIT_PORT% still occupied after retries.
+  exit /b 0
+)
+ping -n 2 127.0.0.1 >nul
+goto :wait_port_release_loop

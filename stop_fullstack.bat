@@ -2,8 +2,7 @@
 setlocal
 
 echo Stopping backend/frontend windows...
-taskkill /FI "WINDOWTITLE eq trade_v backend*" /T /F >nul 2>nul
-taskkill /FI "WINDOWTITLE eq trader_front frontend*" /T /F >nul 2>nul
+powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $procs = Get-Process; foreach($p in $procs){ if($p.MainWindowTitle -like 'trade_v backend*' -or $p.MainWindowTitle -like 'trader_front frontend*'){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
 
 echo Releasing common dev ports (5000, 5173) if still occupied...
 for %%P in (5000 5173) do (

@@ -10,6 +10,9 @@ from monitor.config.db_monitor import exe_query
 logger = logging.getLogger(__name__)
 
 _DB_NAME_CACHE_TTL_SECONDS = 5 * 60
+_AK_CODE_TABLE_MAX_RETRIES = 3
+_AK_CODE_TABLE_RETRY_DELAY_SECONDS = 1
+_AK_CODE_TABLE_RETRY_COOLDOWN_SECONDS = 5 * 60
 _db_name_cache: Dict[str, str] = {}
 _db_name_cache_expire_at: float = 0.0
 _db_name_cache_lock = threading.Lock()
@@ -17,6 +20,7 @@ _db_name_cache_lock = threading.Lock()
 result: Dict[str, Dict[str, str]] = {}
 result_dict = result  # 兼容旧引用
 _result_loaded = False
+_result_next_retry_at: float = 0.0
 _result_load_lock = threading.Lock()
 
 
@@ -73,36 +77,64 @@ def _code_candidates(stock_code: str) -> Set[str]:
 
 
 def _load_result_dict_once() -> None:
-    global _result_loaded
+    global _result_loaded, _result_next_retry_at
     if _result_loaded:
+        return
+    if time.time() < _result_next_retry_at:
         return
 
     with _result_load_lock:
         if _result_loaded:
             return
-        try:
-            result_df = ak.stock_info_a_code_name()
-            records = result_df.to_dict(orient="records")
-            loaded: Dict[str, Dict[str, str]] = {}
-            for record in records:
-                original_code = str(record.get("code") or "").strip()
-                name = str(record.get("name") or "").strip()
-                if not original_code:
+        if _result_loaded:
+            return
+        if time.time() < _result_next_retry_at:
+            return
+
+        for attempt in range(1, _AK_CODE_TABLE_MAX_RETRIES + 1):
+            try:
+                result_df = ak.stock_info_a_code_name()
+                records = result_df.to_dict(orient="records")
+                loaded: Dict[str, Dict[str, str]] = {}
+                for record in records:
+                    original_code = str(record.get("code") or "").strip()
+                    name = str(record.get("name") or "").strip()
+                    if not original_code:
+                        continue
+                    ts_code = convert_code_format(original_code)
+                    if not ts_code:
+                        continue
+                    loaded[ts_code] = {
+                        "ts_code": ts_code,
+                        "symbol": original_code,
+                        "name": name,
+                    }
+                result.clear()
+                result.update(loaded)
+                _result_loaded = True
+                _result_next_retry_at = 0.0
+                logger.info("akshare 股票代码表加载成功，共 %d 条", len(loaded))
+                return
+            except Exception as exc:
+                if attempt < _AK_CODE_TABLE_MAX_RETRIES:
+                    logger.warning(
+                        "加载 akshare 股票代码表失败（第 %d/%d 次）：%s；%d 秒后重试",
+                        attempt,
+                        _AK_CODE_TABLE_MAX_RETRIES,
+                        exc,
+                        _AK_CODE_TABLE_RETRY_DELAY_SECONDS,
+                    )
+                    time.sleep(_AK_CODE_TABLE_RETRY_DELAY_SECONDS)
                     continue
-                ts_code = convert_code_format(original_code)
-                if not ts_code:
-                    continue
-                loaded[ts_code] = {
-                    "ts_code": ts_code,
-                    "symbol": original_code,
-                    "name": name,
-                }
-            result.clear()
-            result.update(loaded)
-        except Exception:
-            logger.exception("加载 akshare 股票代码表失败")
-        finally:
-            _result_loaded = True
+
+                _result_next_retry_at = time.time() + _AK_CODE_TABLE_RETRY_COOLDOWN_SECONDS
+                logger.warning(
+                    "加载 akshare 股票代码表失败，已重试 %d 次；将在 %d 秒后再试。错误：%s",
+                    _AK_CODE_TABLE_MAX_RETRIES,
+                    _AK_CODE_TABLE_RETRY_COOLDOWN_SECONDS,
+                    exc,
+                )
+                logger.debug("akshare 股票代码表加载失败堆栈", exc_info=True)
 
 
 def _refresh_db_name_cache(force: bool = False) -> Dict[str, str]:
@@ -171,5 +203,5 @@ def get_stock_name(stock_code):
     return name or stock_code
 
 
-# 保持旧行为：模块导入时尝试预加载一次，不因失败中断启动
-_load_result_dict_once()
+# 延迟加载：仅在数据库未命中股票名称时再尝试拉取 akshare 代码表，
+# 避免启动阶段因外部网络波动产生无关告警。

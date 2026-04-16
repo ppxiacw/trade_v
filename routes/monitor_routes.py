@@ -574,6 +574,65 @@ def get_alert_history():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@monitor_bp.route('/alerts/stocks', methods=['GET'])
+def get_alert_history_stocks():
+    """获取告警历史涉及的股票列表（用于前端筛选下拉）"""
+    try:
+        limit = int(request.args.get('limit', 5000))
+        limit = max(1, min(limit, 10000))
+
+        cache_key = f"monitor:alerts:stocks:{limit}"
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
+        query = """
+            SELECT
+                l.stock_code,
+                COALESCE(
+                    NULLIF(MAX(COALESCE(l.stock_name, '')), ''),
+                    l.stock_code
+                ) AS stock_name,
+                MAX(l.trigger_time) AS latest_trigger_time
+            FROM stock_alert_log l
+            WHERE l.stock_code IS NOT NULL AND l.stock_code <> ''
+            GROUP BY l.stock_code
+            ORDER BY latest_trigger_time DESC
+            LIMIT %s
+        """
+        rows = db_manager.execute_query(query, (limit,)) or []
+
+        dedup = {}
+        for row in rows:
+            raw_code = str(row.get('stock_code') or '').strip()
+            raw_name = str(row.get('stock_name') or '').strip()
+            normalized_code = normalize_monitor_stock_code(raw_code, raw_name)
+            if not normalized_code:
+                continue
+
+            existing = dedup.get(normalized_code)
+            if existing:
+                if not existing.get('stock_name') and raw_name:
+                    existing['stock_name'] = raw_name
+                continue
+
+            dedup[normalized_code] = {
+                'stock_code': normalized_code,
+                'stock_name': raw_name,
+            }
+
+        stock_list = sorted(dedup.values(), key=lambda item: item['stock_code'])
+        payload = {
+            'success': True,
+            'data': stock_list,
+            'total': len(stock_list),
+        }
+        _cache_set(cache_key, payload, _CACHE_TTL_ALERTS)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @monitor_bp.route('/alerts/stats', methods=['GET'])
 def get_alert_stats():
     """获取告警统计信息"""
