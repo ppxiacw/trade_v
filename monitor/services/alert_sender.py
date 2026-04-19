@@ -13,8 +13,8 @@ class AlertSender:
         for stock in self.config.MONITOR_STOCKS.keys():
             self.last_alert_time[stock] = {}
 
-    def send_alert(self, stock, alerts_with_cooldown):
-        if not self._is_alert_time_allowed():
+    def send_alert(self, stock, alerts_with_cooldown, force_send=False):
+        if not force_send and not self._is_alert_time_allowed():
             return
         current_time = now_in_market_tz().replace(tzinfo=None)
         valid_alerts = []

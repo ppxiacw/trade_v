@@ -4,9 +4,11 @@
 import threading
 import re
 import time
+import json
 from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request
 from utils.tushare_utils import IndexAnalysis
+from utils.GetStockData import get_stock_name
 from monitor.services.volume_radio import get_volume_ratio_simple
 from monitor.config.db_monitor import db_manager, stock_alert_dao
 from monitor.config.stock_code import normalize_monitor_stock_code
@@ -21,6 +23,168 @@ _route_cache = {}
 _CACHE_TTL_STOCKS = 15
 _CACHE_TTL_ALERTS = 8
 _CACHE_TTL_STATS = 12
+
+_DIVERGENCE_PERIOD_LABELS = {
+    'time': '分时',
+    'm1': '1分钟',
+    'm5': '5分钟',
+    'm15': '15分钟',
+    'm30': '30分钟',
+    'day': '日K',
+    'week': '周K',
+    'month': '月K',
+}
+_DIVERGENCE_PERIOD_SECONDS = {
+    'time': 60,
+    'm1': 60,
+    'm5': 300,
+    'm15': 900,
+    'm30': 1800,
+    'day': 86400,
+    'week': 604800,
+    'month': 2592000,
+}
+_DIVERGENCE_COOLDOWN_SECONDS = {
+    'time': 120,
+    'm1': 120,
+    'm5': 300,
+    'm15': 900,
+    'm30': 1800,
+    'day': 21600,
+    'week': 86400,
+    'month': 172800,
+}
+_DIVERGENCE_TYPE_LABELS = {
+    'top': '顶背离',
+    'bottom': '底背离',
+}
+_DIVERGENCE_ALLOWED_PERIODS = ['m1', 'm5', 'm15', 'm30', 'day', 'week', 'month']
+_DIVERGENCE_DEFAULT_PERIODS = ['m30']
+
+
+def _to_bool(value, default=False):
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {'1', 'true', 'yes', 'on'}:
+        return True
+    if text in {'0', 'false', 'no', 'off'}:
+        return False
+    return bool(default)
+
+
+def _to_int_or_none(value):
+    if value is None or value == '':
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_divergence_periods(periods):
+    if isinstance(periods, str):
+        matched = re.findall(r"m1|m5|m15|m30|day|week|month", periods.lower())
+        candidates = [item.strip().lower() for item in matched]
+    elif isinstance(periods, (list, tuple, set)):
+        candidates = [str(item or '').strip().lower() for item in periods]
+    else:
+        candidates = []
+
+    values = []
+    for period in candidates:
+        if not period or period not in _DIVERGENCE_ALLOWED_PERIODS:
+            continue
+        if period not in values:
+            values.append(period)
+    return values or list(_DIVERGENCE_DEFAULT_PERIODS)
+
+
+def _periods_to_storage_text(periods):
+    return json.dumps(_normalize_divergence_periods(periods), ensure_ascii=False)
+
+
+def _parse_periods_from_storage(raw_value):
+    if isinstance(raw_value, str) and raw_value.strip():
+        try:
+            parsed = json.loads(raw_value)
+            return _normalize_divergence_periods(parsed)
+        except Exception:
+            return _normalize_divergence_periods(raw_value)
+    return list(_DIVERGENCE_DEFAULT_PERIODS)
+
+
+def _apply_divergence_defaults_to_stock(stock):
+    stock['divergence_enabled'] = 1 if _to_bool(stock.get('divergence_enabled'), False) else 0
+    stock['divergence_macd_enabled'] = 1 if _to_bool(stock.get('divergence_macd_enabled'), True) else 0
+    stock['divergence_rsi_enabled'] = 1 if _to_bool(stock.get('divergence_rsi_enabled'), True) else 0
+    stock['divergence_top_enabled'] = 1 if _to_bool(stock.get('divergence_top_enabled'), True) else 0
+    stock['divergence_bottom_enabled'] = 1 if _to_bool(stock.get('divergence_bottom_enabled'), True) else 0
+    stock['divergence_periods'] = _parse_periods_from_storage(stock.get('divergence_periods'))
+
+    scan_interval = _to_int_or_none(stock.get('divergence_scan_interval_seconds'))
+    stock['divergence_scan_interval_seconds'] = max(15, scan_interval) if scan_interval is not None else 60
+
+    kline_count = _to_int_or_none(stock.get('divergence_kline_count'))
+    stock['divergence_kline_count'] = max(120, kline_count) if kline_count is not None else 240
+
+    lookback = _to_int_or_none(stock.get('divergence_lookback'))
+    stock['divergence_lookback'] = max(2, lookback) if lookback is not None else 5
+
+
+def _build_divergence_patch_from_payload(data):
+    patch = {}
+    if 'divergence_enabled' in data:
+        patch['divergence_enabled'] = 1 if _to_bool(data.get('divergence_enabled')) else 0
+    if 'divergence_macd_enabled' in data:
+        patch['divergence_macd_enabled'] = 1 if _to_bool(data.get('divergence_macd_enabled'), True) else 0
+    if 'divergence_rsi_enabled' in data:
+        patch['divergence_rsi_enabled'] = 1 if _to_bool(data.get('divergence_rsi_enabled'), True) else 0
+    if 'divergence_top_enabled' in data:
+        patch['divergence_top_enabled'] = 1 if _to_bool(data.get('divergence_top_enabled'), True) else 0
+    if 'divergence_bottom_enabled' in data:
+        patch['divergence_bottom_enabled'] = 1 if _to_bool(data.get('divergence_bottom_enabled'), True) else 0
+    if 'divergence_periods' in data:
+        patch['divergence_periods'] = _periods_to_storage_text(data.get('divergence_periods'))
+    if 'divergence_scan_interval_seconds' in data:
+        value = _to_int_or_none(data.get('divergence_scan_interval_seconds'))
+        patch['divergence_scan_interval_seconds'] = max(15, value) if value is not None else None
+    if 'divergence_kline_count' in data:
+        value = _to_int_or_none(data.get('divergence_kline_count'))
+        patch['divergence_kline_count'] = max(120, value) if value is not None else None
+    if 'divergence_lookback' in data:
+        value = _to_int_or_none(data.get('divergence_lookback'))
+        patch['divergence_lookback'] = max(2, value) if value is not None else None
+    return patch
+
+
+def _safe_float(value):
+    try:
+        num = float(value)
+        return num
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_divergence_alert_message(period, indicator, divergence_type, signal_time, price, indicator_value):
+    period_label = _DIVERGENCE_PERIOD_LABELS.get(period, period or '未知周期')
+    divergence_label = _DIVERGENCE_TYPE_LABELS.get(divergence_type, divergence_type or '背离')
+    pieces = [f"{period_label}{indicator}{divergence_label}"]
+    if signal_time:
+        pieces.append(f"信号时间:{signal_time}")
+    if price is not None:
+        pieces.append(f"价格:{price:.2f}")
+    if indicator_value is not None:
+        pieces.append(f"{indicator}:{indicator_value:.2f}")
+    return " | ".join(pieces)
+
+
+def _get_divergence_cooldown(period):
+    return _DIVERGENCE_COOLDOWN_SECONDS.get(period, 600)
 
 
 def _format_datetime_for_client(value):
@@ -125,7 +289,7 @@ def _find_stock_row_by_aliases(stock_code, stock_name=""):
         return None
     placeholders = ", ".join(["%s"] * len(aliases))
     rows = db_manager.execute_query(
-        f"SELECT id, stock_code, stock_name FROM stocks WHERE stock_code IN ({placeholders}) ORDER BY is_monitor DESC, id DESC LIMIT 1",
+        f"SELECT id, stock_code, stock_name, is_monitor, sort_order FROM stocks WHERE stock_code IN ({placeholders}) ORDER BY is_monitor DESC, id DESC LIMIT 1",
         tuple(aliases)
     )
     return rows[0] if rows else None
@@ -133,7 +297,7 @@ def _find_stock_row_by_aliases(stock_code, stock_name=""):
 
 def _find_stock_row_by_id(stock_id):
     rows = db_manager.execute_query(
-        "SELECT id, stock_code, stock_name FROM stocks WHERE id = %s LIMIT 1",
+        "SELECT id, stock_code, stock_name, is_monitor, sort_order FROM stocks WHERE id = %s LIMIT 1",
         (stock_id,),
     )
     return rows[0] if rows else None
@@ -143,7 +307,7 @@ def _find_stock_row_by_exact_code(stock_code, exclude_id=None):
     if not stock_code:
         return None
 
-    query = "SELECT id, stock_code, stock_name FROM stocks WHERE stock_code = %s"
+    query = "SELECT id, stock_code, stock_name, is_monitor, sort_order FROM stocks WHERE stock_code = %s"
     params = [stock_code]
     if exclude_id is not None:
         query += " AND id <> %s"
@@ -152,6 +316,39 @@ def _find_stock_row_by_exact_code(stock_code, exclude_id=None):
 
     rows = db_manager.execute_query(query, tuple(params))
     return rows[0] if rows else None
+
+
+def _get_next_monitor_sort_order():
+    rows = db_manager.execute_query(
+        "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM stocks WHERE is_monitor = 1"
+    )
+    max_order = int(rows[0].get('max_order') or 0) if rows else 0
+    return max_order + 1
+
+
+def _repair_monitor_sort_orders():
+    rows = db_manager.execute_query(
+        """
+        SELECT id, sort_order
+        FROM stocks
+        WHERE is_monitor = 1
+        ORDER BY
+            CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END ASC,
+            sort_order ASC,
+            id ASC
+        """
+    ) or []
+    expected = 1
+    for row in rows:
+        current = row.get('sort_order')
+        if current != expected:
+            db_manager.execute_update(
+                'stocks',
+                {'sort_order': expected},
+                'id = %s',
+                (row['id'],),
+            )
+        expected += 1
 
 
 def _update_monitor_stock_row(row, stock_code_hint, data):
@@ -186,6 +383,16 @@ def _update_monitor_stock_row(row, stock_code_hint, data):
         update_data['trigger_min_price'] = data.get('trigger_min_price')
     if 'trigger_max_price' in data:
         update_data['trigger_max_price'] = data.get('trigger_max_price')
+    if 'sort_order' in data:
+        try:
+            update_data['sort_order'] = int(data.get('sort_order'))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': '排序值格式错误'}), 400
+
+    if ('is_monitor' in data and data.get('is_monitor')) and not row.get('is_monitor'):
+        if 'sort_order' not in update_data:
+            update_data['sort_order'] = _get_next_monitor_sort_order()
+    update_data.update(_build_divergence_patch_from_payload(data))
 
     if not update_data:
         return jsonify({'success': False, 'message': '没有需要更新的数据'}), 400
@@ -228,7 +435,7 @@ def _remove_monitor_stock_row(row):
 
 def _ensure_monitor_stock_columns_once():
     """
-    确保监控股票表包含告警价格区间字段（幂等）。
+    确保监控股票表包含监控配置字段（幂等）。
     """
     global _monitor_columns_ready
     if _monitor_columns_ready:
@@ -242,21 +449,27 @@ def _ensure_monitor_stock_columns_once():
         try:
             with db_manager.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
-                cursor.execute("SHOW COLUMNS FROM stocks LIKE 'trigger_min_price'")
-                has_min = cursor.fetchone() is not None
-                cursor.fetchall()
-                cursor.execute("SHOW COLUMNS FROM stocks LIKE 'trigger_max_price'")
-                has_max = cursor.fetchone() is not None
-                cursor.fetchall()
+                expected_columns = {
+                    'sort_order': "ALTER TABLE stocks ADD COLUMN sort_order INT NULL COMMENT '监控股票排序'",
+                    'trigger_min_price': "ALTER TABLE stocks ADD COLUMN trigger_min_price DECIMAL(12,4) NULL COMMENT '告警触发最小价格'",
+                    'trigger_max_price': "ALTER TABLE stocks ADD COLUMN trigger_max_price DECIMAL(12,4) NULL COMMENT '告警触发最大价格'",
+                    'divergence_enabled': "ALTER TABLE stocks ADD COLUMN divergence_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用背离监控'",
+                    'divergence_periods': "ALTER TABLE stocks ADD COLUMN divergence_periods VARCHAR(255) NULL COMMENT '背离监控周期(JSON数组)'",
+                    'divergence_scan_interval_seconds': "ALTER TABLE stocks ADD COLUMN divergence_scan_interval_seconds INT NULL COMMENT '背离扫描间隔秒'",
+                    'divergence_kline_count': "ALTER TABLE stocks ADD COLUMN divergence_kline_count INT NULL COMMENT '背离计算K线样本数'",
+                    'divergence_lookback': "ALTER TABLE stocks ADD COLUMN divergence_lookback INT NULL COMMENT '背离局部极值窗口'",
+                    'divergence_macd_enabled': "ALTER TABLE stocks ADD COLUMN divergence_macd_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用MACD背离'",
+                    'divergence_rsi_enabled': "ALTER TABLE stocks ADD COLUMN divergence_rsi_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用RSI背离'",
+                    'divergence_top_enabled': "ALTER TABLE stocks ADD COLUMN divergence_top_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用顶背离'",
+                    'divergence_bottom_enabled': "ALTER TABLE stocks ADD COLUMN divergence_bottom_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用底背离'",
+                }
 
-                if not has_min:
-                    cursor.execute(
-                        "ALTER TABLE stocks ADD COLUMN trigger_min_price DECIMAL(12,4) NULL COMMENT '告警触发最小价格'"
-                    )
-                if not has_max:
-                    cursor.execute(
-                        "ALTER TABLE stocks ADD COLUMN trigger_max_price DECIMAL(12,4) NULL COMMENT '告警触发最大价格'"
-                    )
+                for column_name, alter_sql in expected_columns.items():
+                    cursor.execute(f"SHOW COLUMNS FROM stocks LIKE '{column_name}'")
+                    exists = cursor.fetchone() is not None
+                    cursor.fetchall()
+                    if not exists:
+                        cursor.execute(alter_sql)
             _monitor_columns_ready = True
         except Exception:
             # 字段补齐失败不阻断接口（旧环境继续可用）
@@ -317,12 +530,12 @@ def get_monitor_stocks():
             return jsonify(cached)
 
         _ensure_monitor_stock_columns_once()
+        _repair_monitor_sort_orders()
         # 只查询监控中的股票
-        query = "SELECT * FROM stocks WHERE is_monitor = 1 ORDER BY stock_code ASC"
+        query = "SELECT * FROM stocks WHERE is_monitor = 1 ORDER BY sort_order ASC, id ASC"
         stocks = db_manager.execute_query(query)
         
         # 为每个股票添加默认的配置字段（如果不存在）
-        import json
         for stock in stocks:
             normalized_code = normalize_monitor_stock_code(stock.get('stock_code'), stock.get('stock_name'))
             if stock.get('id') and normalized_code and normalized_code != stock.get('stock_code'):
@@ -370,6 +583,8 @@ def get_monitor_stocks():
             # 价格区间触发（为空表示不限制）
             stock['trigger_min_price'] = stock.get('trigger_min_price')
             stock['trigger_max_price'] = stock.get('trigger_max_price')
+            stock['sort_order'] = int(stock.get('sort_order') or 0)
+            _apply_divergence_defaults_to_stock(stock)
         
         payload = {
             'success': True,
@@ -403,6 +618,10 @@ def add_monitor_stock():
                 'stock_code': stock_code,
                 'stock_name': stock_name or existing.get('stock_name', ''),
             }
+            if existing.get('is_monitor'):
+                reactivate_data['sort_order'] = existing.get('sort_order') or _get_next_monitor_sort_order()
+            else:
+                reactivate_data['sort_order'] = _get_next_monitor_sort_order()
             if 'common' in data:
                 reactivate_data['common'] = 1 if data['common'] else 0
             if 'normal_movement' in data:
@@ -411,6 +630,7 @@ def add_monitor_stock():
                 reactivate_data['trigger_min_price'] = data.get('trigger_min_price')
             if 'trigger_max_price' in data:
                 reactivate_data['trigger_max_price'] = data.get('trigger_max_price')
+            reactivate_data.update(_build_divergence_patch_from_payload(data))
 
             # 更新为监控状态
             db_manager.execute_update(
@@ -430,7 +650,8 @@ def add_monitor_stock():
         insert_data = {
             'stock_code': stock_code,
             'stock_name': stock_name,
-            'is_monitor': 1
+            'is_monitor': 1,
+            'sort_order': _get_next_monitor_sort_order(),
         }
         if 'common' in data:
             insert_data['common'] = 1 if data['common'] else 0
@@ -440,6 +661,7 @@ def add_monitor_stock():
             insert_data['trigger_min_price'] = data.get('trigger_min_price')
         if 'trigger_max_price' in data:
             insert_data['trigger_max_price'] = data.get('trigger_max_price')
+        insert_data.update(_build_divergence_patch_from_payload(data))
         
         stock_id = db_manager.execute_insert('stocks', insert_data)
         if not stock_id:
@@ -500,19 +722,228 @@ def remove_monitor_stock_by_id(stock_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@monitor_bp.route('/stocks/by-id/<int:stock_id>/move', methods=['POST'])
+def move_monitor_stock_by_id(stock_id):
+    """调整监控股票顺序（上移/下移）。"""
+    try:
+        _ensure_monitor_stock_columns_once()
+        payload = request.get_json(silent=True) or {}
+        direction = str(payload.get('direction') or '').strip().lower()
+        if direction not in {'up', 'down'}:
+            return jsonify({'success': False, 'message': 'direction 仅支持 up/down'}), 400
+
+        row = _find_stock_row_by_id(stock_id)
+        if not row:
+            return jsonify({'success': False, 'message': '股票不存在'}), 404
+        if not row.get('is_monitor'):
+            return jsonify({'success': False, 'message': '该股票未处于监控列表'}), 400
+
+        _repair_monitor_sort_orders()
+        ordered_rows = db_manager.execute_query(
+            "SELECT id, sort_order FROM stocks WHERE is_monitor = 1 ORDER BY sort_order ASC, id ASC"
+        ) or []
+        index_map = {item['id']: idx for idx, item in enumerate(ordered_rows)}
+        current_idx = index_map.get(stock_id)
+        if current_idx is None:
+            return jsonify({'success': False, 'message': '排序数据异常'}), 500
+
+        if direction == 'up':
+            target_idx = current_idx - 1
+            if target_idx < 0:
+                return jsonify({'success': True, 'message': '已是第一位'}), 200
+        else:
+            target_idx = current_idx + 1
+            if target_idx >= len(ordered_rows):
+                return jsonify({'success': True, 'message': '已是最后一位'}), 200
+
+        current_row = ordered_rows[current_idx]
+        target_row = ordered_rows[target_idx]
+        current_order = int(current_row.get('sort_order') or (current_idx + 1))
+        target_order = int(target_row.get('sort_order') or (target_idx + 1))
+
+        db_manager.execute_update('stocks', {'sort_order': target_order}, 'id = %s', (current_row['id'],))
+        db_manager.execute_update('stocks', {'sort_order': current_order}, 'id = %s', (target_row['id'],))
+        _repair_monitor_sort_orders()
+        _invalidate_monitor_cache()
+
+        return jsonify({'success': True, 'message': '顺序已更新'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/stocks/reorder', methods=['POST'])
+def reorder_monitor_stocks():
+    """按拖拽顺序重排监控股票。"""
+    try:
+        _ensure_monitor_stock_columns_once()
+        payload = request.get_json(silent=True) or {}
+        stock_ids = payload.get('stock_ids')
+        if not isinstance(stock_ids, list) or not stock_ids:
+            return jsonify({'success': False, 'message': 'stock_ids 必须是非空数组'}), 400
+
+        normalized_ids = []
+        for stock_id in stock_ids:
+            try:
+                value = int(stock_id)
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'message': 'stock_ids 包含无效ID'}), 400
+            if value <= 0:
+                return jsonify({'success': False, 'message': 'stock_ids 包含无效ID'}), 400
+            if value in normalized_ids:
+                return jsonify({'success': False, 'message': 'stock_ids 不允许重复'}), 400
+            normalized_ids.append(value)
+
+        _repair_monitor_sort_orders()
+        rows = db_manager.execute_query(
+            "SELECT id FROM stocks WHERE is_monitor = 1 ORDER BY sort_order ASC, id ASC"
+        ) or []
+        monitor_ids = [int(row['id']) for row in rows if row.get('id')]
+        if set(normalized_ids) != set(monitor_ids) or len(normalized_ids) != len(monitor_ids):
+            return jsonify({'success': False, 'message': '排序列表与当前监控股票不一致，请刷新后重试'}), 409
+
+        for idx, stock_id in enumerate(normalized_ids, start=1):
+            db_manager.execute_update('stocks', {'sort_order': idx}, 'id = %s', (stock_id,))
+
+        _repair_monitor_sort_orders()
+        _invalidate_monitor_cache()
+        return jsonify({'success': True, 'message': '顺序已更新'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 # ==================== 告警历史记录接口 ====================
+
+
+@monitor_bp.route('/alerts/divergence', methods=['POST'])
+def post_divergence_alert():
+    """接收前端背离信号并发送钉钉告警。"""
+    try:
+        payload = request.get_json(silent=True) or {}
+
+        stock_name = str(payload.get('stock_name') or '').strip()
+        stock_code = normalize_monitor_stock_code(payload.get('stock_code'), stock_name)
+        if not stock_code:
+            return jsonify({'success': False, 'message': '缺少有效股票代码'}), 400
+
+        indicator = str(payload.get('indicator') or '').strip().upper()
+        if indicator not in {'MACD', 'RSI'}:
+            return jsonify({'success': False, 'message': 'indicator 仅支持 MACD/RSI'}), 400
+
+        divergence_type = str(payload.get('divergence_type') or '').strip().lower()
+        if divergence_type not in {'top', 'bottom'}:
+            return jsonify({'success': False, 'message': 'divergence_type 仅支持 top/bottom'}), 400
+
+        period = str(payload.get('period') or 'm30').strip().lower()
+        signal_time = str(payload.get('signal_time') or '').strip()
+        price = _safe_float(payload.get('price'))
+        indicator_value = _safe_float(payload.get('indicator_value'))
+
+        alert_message = _build_divergence_alert_message(
+            period=period,
+            indicator=indicator,
+            divergence_type=divergence_type,
+            signal_time=signal_time,
+            price=price,
+            indicator_value=indicator_value,
+        )
+        cooldown = _get_divergence_cooldown(period)
+        stock_display_name = stock_name or get_stock_name(stock_code)
+
+        alert_data = {
+            'stock_code': stock_code,
+            'stock_name': stock_display_name,
+            'alert_type': '背离',
+            'alert_level': 2,
+            'alert_message': alert_message,
+            'trigger_time': datetime.now(),
+            'windows_sec': _DIVERGENCE_PERIOD_SECONDS.get(period, 0),
+        }
+
+        get_alert_sender().send_alert(stock_code, [(alert_data, cooldown)], force_send=True)
+
+        return jsonify({
+            'success': True,
+            'message': '背离告警已处理',
+            'data': {
+                'stock_code': stock_code,
+                'stock_name': stock_display_name,
+                'indicator': indicator,
+                'divergence_type': divergence_type,
+                'period': period,
+                'cooldown': cooldown,
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/settings/divergence', methods=['GET'])
+def get_divergence_settings():
+    """获取后端背离监控运行配置。"""
+    try:
+        checker = get_alert_checker()
+        config = checker.get_divergence_config()
+        return jsonify({
+            'success': True,
+            'data': config,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/settings/divergence', methods=['PUT'])
+def update_divergence_settings():
+    """更新后端背离监控运行配置（立即生效并持久化）。"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        scan_interval_seconds = payload.get('scan_interval_seconds')
+        kline_count = payload.get('kline_count')
+        lookback = payload.get('lookback')
+
+        try:
+            if scan_interval_seconds is not None:
+                scan_interval_seconds = int(scan_interval_seconds)
+            if kline_count is not None:
+                kline_count = int(kline_count)
+            if lookback is not None:
+                lookback = int(lookback)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': '数值配置格式错误'}), 400
+
+        checker = get_alert_checker()
+        checker.update_divergence_config(
+            periods=payload.get('periods'),
+            scan_interval_seconds=scan_interval_seconds,
+            kline_count=kline_count,
+            lookback=lookback,
+            persist=True,
+            reset_state=True,
+        )
+        config = checker.get_divergence_config()
+        return jsonify({
+            'success': True,
+            'message': '背离监控配置已更新并立即生效',
+            'data': config,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 
 @monitor_bp.route('/alerts', methods=['GET'])
 def get_alert_history():
     """获取告警历史记录"""
     try:
+        _ensure_monitor_stock_columns_once()
         # 获取查询参数
         stock_code = request.args.get('stock_code')
         alert_type = request.args.get('alert_type')
         start_time = request.args.get('start_time')
         end_time = request.args.get('end_time')
+        monitor_only = _to_bool(request.args.get('monitor_only'), False)
         limit = int(request.args.get('limit', 100))
         offset = int(request.args.get('offset', 0))
+        limit = max(1, min(limit, 5000))
+        offset = max(0, offset)
         
         # 构建查询条件
         conditions = []
@@ -520,21 +951,25 @@ def get_alert_history():
         
         if stock_code:
             stock_code = normalize_monitor_stock_code(stock_code)
-            conditions.append("stock_code = %s")
+            conditions.append("l.stock_code = %s")
             params.append(stock_code)
         if alert_type:
-            conditions.append("alert_type = %s")
+            conditions.append("l.alert_type = %s")
             params.append(alert_type)
         if start_time:
-            conditions.append("trigger_time >= %s")
+            conditions.append("l.trigger_time >= %s")
             params.append(start_time)
         if end_time:
-            conditions.append("trigger_time <= %s")
+            conditions.append("l.trigger_time <= %s")
             params.append(end_time)
+        if monitor_only:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM stocks ms WHERE ms.is_monitor = 1 AND BINARY ms.stock_code = BINARY l.stock_code)"
+            )
 
         cache_key = (
             f"monitor:alerts:{stock_code or ''}:{alert_type or ''}:"
-            f"{start_time or ''}:{end_time or ''}:{limit}:{offset}"
+            f"{start_time or ''}:{end_time or ''}:{int(monitor_only)}:{limit}:{offset}"
         )
         cached = _cache_get(cache_key)
         if cached is not None:
@@ -543,22 +978,38 @@ def get_alert_history():
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
         # 查询总数
-        count_query = f"SELECT COUNT(*) as total FROM stock_alert_log WHERE {where_clause}"
+        count_query = f"SELECT COUNT(*) as total FROM stock_alert_log l WHERE {where_clause}"
         count_result = db_manager.execute_query(count_query, tuple(params) if params else None)
         total = count_result[0]['total'] if count_result else 0
         
         # 查询数据
         query = f"""
-            SELECT id, stock_code, stock_name, alert_type, alert_level, 
-                   alert_message, trigger_time, windows_sec
-            FROM stock_alert_log 
+            SELECT l.id, l.stock_code, l.stock_name, l.alert_type, l.alert_level, 
+                   l.alert_message, l.trigger_time, l.windows_sec
+            FROM stock_alert_log l
+            LEFT JOIN stocks s ON BINARY s.stock_code = BINARY l.stock_code
             WHERE {where_clause}
-            ORDER BY trigger_time DESC
-            LIMIT %s OFFSET %s
+            ORDER BY
+                CASE WHEN s.sort_order IS NULL THEN 1 ELSE 0 END ASC,
+                s.sort_order ASC,
+                l.stock_code ASC,
+                l.trigger_time DESC,
+                l.id DESC
+            LIMIT {limit} OFFSET {offset}
         """
-        params.extend([limit, offset])
-        
-        alerts = db_manager.execute_query(query, tuple(params))
+        query_params = tuple(params) if params else None
+        alerts = db_manager.execute_query(query, query_params)
+        if not alerts and total > 0 and offset < total:
+            # 兼容旧库排序字段/字符集异常时的兜底查询，避免历史页空白。
+            fallback_query = f"""
+                SELECT l.id, l.stock_code, l.stock_name, l.alert_type, l.alert_level, 
+                       l.alert_message, l.trigger_time, l.windows_sec
+                FROM stock_alert_log l
+                WHERE {where_clause}
+                ORDER BY l.trigger_time DESC, l.id DESC
+                LIMIT {limit} OFFSET {offset}
+            """
+            alerts = db_manager.execute_query(fallback_query, query_params)
         alerts = _serialize_alert_rows_for_client(alerts)
         
         payload = {

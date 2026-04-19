@@ -1,7 +1,46 @@
+import json
+import logging
+import os
+import re
+import threading
+import time
 from datetime import datetime
+import requests
 from utils.tushare_utils import IndexAnalysis
 from utils.IndicatorCalculation import IndicatorCalculation
 from utils.GetStockData import get_stock_name
+from monitor.config.db_monitor import db_manager
+
+_logger = logging.getLogger(__name__)
+_DIVERGENCE_PERIOD_WINDOW_SECONDS = {
+    'm1': 60,
+    'm5': 300,
+    'm15': 900,
+    'm30': 1800,
+    'day': 86400,
+    'week': 604800,
+    'month': 2592000,
+}
+_DIVERGENCE_PERIOD_COOLDOWN_SECONDS = {
+    'm1': 180,
+    'm5': 300,
+    'm15': 900,
+    'm30': 1800,
+    'day': 21600,
+    'week': 86400,
+    'month': 172800,
+}
+_DIVERGENCE_RECENT_BAR_LIMIT = {
+    'm1': 60,
+    'm5': 48,
+    'm15': 32,
+    'm30': 24,
+    'day': 12,
+    'week': 8,
+    'month': 6,
+}
+_RUNTIME_SETTING_TABLE = 'monitor_runtime_settings'
+_DIVERGENCE_SETTING_KEY = 'divergence_monitor_config'
 
 
 class AlertChecker:
@@ -10,6 +49,17 @@ class AlertChecker:
         self.stock_data = stock_data
         self._last_candle_times = {}
         self._rsi_trigger_states = {}
+        self._divergence_lock = threading.Lock()
+        self._divergence_periods = self._load_divergence_periods()
+        self._divergence_scan_interval_seconds = max(
+            15, int(os.getenv('DIVERGENCE_SCAN_INTERVAL_SECONDS', '60'))
+        )
+        self._divergence_kline_count = max(120, int(os.getenv('DIVERGENCE_KLINE_COUNT', '240')))
+        self._divergence_lookback = max(2, int(os.getenv('DIVERGENCE_LOOKBACK', '5')))
+        self._divergence_last_scan_at = {}
+        self._divergence_last_signal = {}
+        self._divergence_bootstrapped = set()
+        self._load_divergence_settings_from_storage()
 
     def check_all_conditions(self, stock):
         alerts = []
@@ -46,7 +96,525 @@ class AlertChecker:
                 common_alerts = self._check_common_by_min(stock, period)
                 alerts.extend(common_alerts)
 
+        divergence_alerts = self._check_divergence_alerts(stock)
+        alerts.extend(divergence_alerts)
+
         return alerts
+
+    def _load_divergence_periods(self):
+        raw = str(os.getenv('DIVERGENCE_MONITOR_PERIODS', 'm30') or '').strip().lower()
+        return self._normalize_divergence_periods(raw)
+
+    def _normalize_divergence_periods(self, periods):
+        allowed = {'m1', 'm5', 'm15', 'm30', 'day', 'week', 'month'}
+        if isinstance(periods, str):
+            matched = re.findall(r"m1|m5|m15|m30|day|week|month", periods.lower())
+            candidates = [item.strip().lower() for item in matched]
+        elif isinstance(periods, (list, tuple, set)):
+            candidates = [str(item or '').strip().lower() for item in periods]
+        else:
+            candidates = []
+
+        values = []
+        for period in candidates:
+            if not period or period not in allowed:
+                continue
+            if period not in values:
+                values.append(period)
+        return values or ['m30']
+
+    def _ensure_runtime_setting_table(self):
+        conn = None
+        cursor = None
+        try:
+            with db_manager.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {_RUNTIME_SETTING_TABLE} (
+                        setting_key VARCHAR(128) NOT NULL PRIMARY KEY,
+                        setting_value TEXT NULL,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+        except Exception as e:
+            _logger.warning("确保运行时配置表失败: %s", e)
+        finally:
+            if cursor:
+                cursor.close()
+
+    def _load_divergence_settings_from_storage(self):
+        self._ensure_runtime_setting_table()
+        rows = db_manager.execute_query(
+            f"SELECT setting_value FROM {_RUNTIME_SETTING_TABLE} WHERE setting_key = %s LIMIT 1",
+            (_DIVERGENCE_SETTING_KEY,),
+        )
+        if not rows:
+            return
+        raw_value = rows[0].get('setting_value')
+        if not raw_value:
+            return
+        try:
+            payload = json.loads(raw_value)
+        except Exception:
+            return
+        self.update_divergence_config(
+            periods=payload.get('periods'),
+            scan_interval_seconds=payload.get('scan_interval_seconds'),
+            kline_count=payload.get('kline_count'),
+            lookback=payload.get('lookback'),
+            persist=False,
+            reset_state=True,
+        )
+
+    def _save_divergence_settings_to_storage(self):
+        self._ensure_runtime_setting_table()
+        payload = self.get_divergence_config()
+        db_manager.execute_delete(_RUNTIME_SETTING_TABLE, "setting_key = %s", (_DIVERGENCE_SETTING_KEY,))
+        db_manager.execute_insert(
+            _RUNTIME_SETTING_TABLE,
+            {
+                'setting_key': _DIVERGENCE_SETTING_KEY,
+                'setting_value': json.dumps(payload, ensure_ascii=False),
+            }
+        )
+
+    def get_divergence_config(self):
+        with self._divergence_lock:
+            return {
+                'periods': list(self._divergence_periods),
+                'scan_interval_seconds': int(self._divergence_scan_interval_seconds),
+                'kline_count': int(self._divergence_kline_count),
+                'lookback': int(self._divergence_lookback),
+            }
+
+    def update_divergence_config(
+        self,
+        *,
+        periods=None,
+        scan_interval_seconds=None,
+        kline_count=None,
+        lookback=None,
+        persist=True,
+        reset_state=True,
+    ):
+        with self._divergence_lock:
+            if periods is not None:
+                self._divergence_periods = self._normalize_divergence_periods(periods)
+            if scan_interval_seconds is not None:
+                self._divergence_scan_interval_seconds = max(15, int(scan_interval_seconds))
+            if kline_count is not None:
+                self._divergence_kline_count = max(120, int(kline_count))
+            if lookback is not None:
+                self._divergence_lookback = max(2, int(lookback))
+
+            if reset_state:
+                self._divergence_last_scan_at = {}
+                self._divergence_last_signal = {}
+                self._divergence_bootstrapped = set()
+
+        if persist:
+            self._save_divergence_settings_to_storage()
+
+    def _check_divergence_alerts(self, stock):
+        alerts = []
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        stock_divergence_cfg = self._get_stock_divergence_config(stock_cfg)
+        if not stock_divergence_cfg.get('enabled'):
+            return alerts
+
+        divergence_cfg = self.get_divergence_config()
+        periods = stock_divergence_cfg.get('periods') or divergence_cfg.get('periods') or []
+        scan_interval_seconds = int(
+            stock_divergence_cfg.get('scan_interval_seconds')
+            or divergence_cfg.get('scan_interval_seconds')
+            or 60
+        )
+        kline_count = int(
+            stock_divergence_cfg.get('kline_count')
+            or divergence_cfg.get('kline_count')
+            or 240
+        )
+        lookback = int(
+            stock_divergence_cfg.get('lookback')
+            or divergence_cfg.get('lookback')
+            or 5
+        )
+
+        if not periods:
+            return alerts
+
+        now_ts = time.time()
+        for period in periods:
+            if not self._should_scan_divergence(stock, period, now_ts, scan_interval_seconds):
+                continue
+
+            kline_rows = self._fetch_kline_rows(stock, period, kline_count)
+            if len(kline_rows) < max(60, lookback * 12):
+                continue
+
+            close_values = [item['close'] for item in kline_rows]
+            macd_dif = self._calculate_macd_dif_series(close_values)
+            rsi_series = self._calculate_rsi_series(close_values, period=14)
+
+            macd_divergence = self._detect_divergence(kline_rows, macd_dif, lookback)
+            rsi_divergence = self._detect_divergence(kline_rows, rsi_series, lookback)
+
+            candidates = []
+            if stock_divergence_cfg.get('macd_enabled'):
+                if stock_divergence_cfg.get('top_enabled'):
+                    candidates.append(('MACD', 'top', macd_divergence['top'][-1] if macd_divergence['top'] else None))
+                if stock_divergence_cfg.get('bottom_enabled'):
+                    candidates.append(('MACD', 'bottom', macd_divergence['bottom'][-1] if macd_divergence['bottom'] else None))
+            if stock_divergence_cfg.get('rsi_enabled'):
+                if stock_divergence_cfg.get('top_enabled'):
+                    candidates.append(('RSI', 'top', rsi_divergence['top'][-1] if rsi_divergence['top'] else None))
+                if stock_divergence_cfg.get('bottom_enabled'):
+                    candidates.append(('RSI', 'bottom', rsi_divergence['bottom'][-1] if rsi_divergence['bottom'] else None))
+            if not candidates:
+                continue
+
+            signal_items = []
+            recent_start_index = max(0, len(kline_rows) - _DIVERGENCE_RECENT_BAR_LIMIT.get(period, 24))
+            for indicator, divergence_type, point in candidates:
+                if not point:
+                    continue
+                signal_index = int(point.get('index', -1))
+                if signal_index < recent_start_index or signal_index >= len(kline_rows):
+                    continue
+                row = kline_rows[signal_index]
+                signal_time = row.get('time')
+                signal_key = f"{stock}|{period}|{indicator}|{divergence_type}|{signal_time}"
+                signal_items.append((indicator, divergence_type, point, row, signal_key))
+
+            # 首次扫描仅建立状态，不直接告警，避免服务重启后把历史信号当成新信号
+            bootstrap_key = f"{stock}|{period}"
+            if bootstrap_key not in self._divergence_bootstrapped:
+                for indicator, divergence_type, _, _, signal_key in signal_items:
+                    state_key = f"{stock}|{period}|{indicator}|{divergence_type}"
+                    self._divergence_last_signal[state_key] = signal_key
+                self._divergence_bootstrapped.add(bootstrap_key)
+                continue
+
+            for indicator, divergence_type, point, row, signal_key in signal_items:
+                state_key = f"{stock}|{period}|{indicator}|{divergence_type}"
+                if self._divergence_last_signal.get(state_key) == signal_key:
+                    continue
+
+                self._divergence_last_signal[state_key] = signal_key
+                divergence_label = '顶背离' if divergence_type == 'top' else '底背离'
+                period_label = self._format_period_label(period)
+                signal_time = self._format_signal_time(row.get('time'))
+                indicator_value = point.get('indicatorValue')
+                price_value = point.get('priceValue')
+
+                msg_parts = [f"{period_label}{indicator}{divergence_label}"]
+                if signal_time:
+                    msg_parts.append(f"时间:{signal_time}")
+                if isinstance(price_value, (int, float)):
+                    msg_parts.append(f"价格:{float(price_value):.2f}")
+                if isinstance(indicator_value, (int, float)):
+                    msg_parts.append(f"{indicator}:{float(indicator_value):.2f}")
+                alert_message = " | ".join(msg_parts)
+
+                alert_data = self._create_alert_data(
+                    stock,
+                    alert_message,
+                    _DIVERGENCE_PERIOD_WINDOW_SECONDS.get(period, 0),
+                    '背离'
+                )
+                cooldown = _DIVERGENCE_PERIOD_COOLDOWN_SECONDS.get(period, self.config.ALERT_COOLDOWN)
+                alerts.append((alert_data, cooldown))
+
+        return alerts
+
+    def _to_bool(self, value, default=False):
+        if value is None:
+            return bool(default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        text = str(value).strip().lower()
+        if text in {'1', 'true', 'yes', 'on'}:
+            return True
+        if text in {'0', 'false', 'no', 'off'}:
+            return False
+        return bool(default)
+
+    def _parse_stock_divergence_periods(self, raw_value):
+        if isinstance(raw_value, (list, tuple, set)):
+            return self._normalize_divergence_periods(raw_value)
+        if isinstance(raw_value, str) and raw_value.strip():
+            try:
+                parsed = json.loads(raw_value)
+            except Exception:
+                parsed = raw_value
+            return self._normalize_divergence_periods(parsed)
+        return None
+
+    def _int_or_none(self, value):
+        if value is None or value == '':
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _get_stock_divergence_config(self, stock_cfg):
+        periods = self._parse_stock_divergence_periods(stock_cfg.get('divergence_periods'))
+        scan_interval = self._int_or_none(stock_cfg.get('divergence_scan_interval_seconds'))
+        kline_count = self._int_or_none(stock_cfg.get('divergence_kline_count'))
+        lookback = self._int_or_none(stock_cfg.get('divergence_lookback'))
+        return {
+            'enabled': self._to_bool(stock_cfg.get('divergence_enabled'), False),
+            'macd_enabled': self._to_bool(stock_cfg.get('divergence_macd_enabled'), True),
+            'rsi_enabled': self._to_bool(stock_cfg.get('divergence_rsi_enabled'), True),
+            'top_enabled': self._to_bool(stock_cfg.get('divergence_top_enabled'), True),
+            'bottom_enabled': self._to_bool(stock_cfg.get('divergence_bottom_enabled'), True),
+            'periods': periods,
+            'scan_interval_seconds': max(15, scan_interval) if scan_interval is not None else None,
+            'kline_count': max(120, kline_count) if kline_count is not None else None,
+            'lookback': max(2, lookback) if lookback is not None else None,
+        }
+
+    def _should_scan_divergence(self, stock, period, now_ts, scan_interval_seconds):
+        key = f"{stock}|{period}"
+        last_scan = self._divergence_last_scan_at.get(key, 0.0)
+        if now_ts - last_scan < max(1, int(scan_interval_seconds)):
+            return False
+        self._divergence_last_scan_at[key] = now_ts
+        return True
+
+    def _format_period_label(self, period):
+        return {
+            'm1': '1分钟',
+            'm5': '5分钟',
+            'm15': '15分钟',
+            'm30': '30分钟',
+            'day': '日K',
+            'week': '周K',
+            'month': '月K',
+        }.get(period, period)
+
+    def _normalize_stock_code_for_kline(self, stock_code):
+        text = str(stock_code or '').strip()
+        if not text:
+            return text
+
+        suffix_match = re.fullmatch(r'([0-9]{6})\.(sh|sz)', text, flags=re.IGNORECASE)
+        if suffix_match:
+            return f"{suffix_match.group(2).lower()}{suffix_match.group(1)}"
+
+        prefix_match = re.fullmatch(r'(sh|sz)([0-9]{6})', text, flags=re.IGNORECASE)
+        if prefix_match:
+            return f"{prefix_match.group(1).lower()}{prefix_match.group(2)}"
+
+        pure_match = re.fullmatch(r'([0-9]{1,6})', text)
+        if pure_match:
+            pure = pure_match.group(1).zfill(6)
+            exchange = 'sh' if pure.startswith('6') else 'sz'
+            return f"{exchange}{pure}"
+
+        return text.lower()
+
+    def _parse_jsonp_payload(self, text):
+        try:
+            return json.loads(text)
+        except Exception:
+            pass
+
+        match = re.search(r'=\s*(\{.*\})\s*;?\s*$', str(text or ''), re.DOTALL)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            return None
+
+    def _fetch_kline_rows(self, stock_code, period, count):
+        formatted_code = self._normalize_stock_code_for_kline(stock_code)
+        if not formatted_code:
+            return []
+
+        if period in {'day', 'week', 'month'}:
+            url = (
+                f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?"
+                f"param={formatted_code},{period},,,{count},qfq&_var=kline_{period}"
+            )
+            kline_key = f"qfq{period}"
+        else:
+            url = (
+                f"https://ifzq.gtimg.cn/appstock/app/kline/mkline?"
+                f"param={formatted_code},{period},,{count}&_var=kline_{period}"
+            )
+            kline_key = period
+
+        try:
+            response = requests.get(url, timeout=8)
+            payload = self._parse_jsonp_payload(response.text)
+            if not payload or payload.get('code') != 0:
+                return []
+
+            stock_data = payload.get('data', {}).get(formatted_code) or {}
+            raw_rows = stock_data.get(kline_key) or stock_data.get(period) or []
+            rows = []
+            for item in raw_rows:
+                if not isinstance(item, (list, tuple)) or len(item) < 5:
+                    continue
+                try:
+                    close_value = float(item[2])
+                except (TypeError, ValueError):
+                    continue
+                rows.append({
+                    'time': str(item[0]),
+                    'close': close_value,
+                })
+            return rows
+        except Exception as e:
+            _logger.debug("拉取背离K线失败 stock=%s period=%s err=%s", stock_code, period, e)
+            return []
+
+    def _calculate_macd_dif_series(self, close_values, short_period=12, long_period=26, signal_period=9):
+        if not close_values:
+            return []
+        ema_short = []
+        ema_long = []
+        dif_values = []
+        dea_values = []
+
+        for i, close_price in enumerate(close_values):
+            if i == 0:
+                ema_short.append(close_price)
+                ema_long.append(close_price)
+                dif_values.append(0.0)
+                dea_values.append(0.0)
+                continue
+            prev_ema_short = ema_short[-1]
+            prev_ema_long = ema_long[-1]
+            current_ema_short = (close_price * 2 / (short_period + 1)) + (prev_ema_short * (1 - 2 / (short_period + 1)))
+            current_ema_long = (close_price * 2 / (long_period + 1)) + (prev_ema_long * (1 - 2 / (long_period + 1)))
+            ema_short.append(current_ema_short)
+            ema_long.append(current_ema_long)
+
+            dif = current_ema_short - current_ema_long
+            dif_values.append(dif)
+            dea = (dif * 2 / (signal_period + 1)) + (dea_values[-1] * (1 - 2 / (signal_period + 1)))
+            dea_values.append(dea)
+
+        return [round(v, 4) for v in dif_values]
+
+    def _calculate_rsi_series(self, close_values, period=14):
+        length = len(close_values)
+        if length == 0:
+            return []
+        if length == 1:
+            return [None]
+
+        gains = [0.0]
+        losses = [0.0]
+        for i in range(1, length):
+            change = close_values[i] - close_values[i - 1]
+            gains.append(change if change > 0 else 0.0)
+            losses.append(abs(change) if change < 0 else 0.0)
+
+        rsi = []
+        for i in range(length):
+            if i < period:
+                rsi.append(None)
+                continue
+            gain_sum = 0.0
+            loss_sum = 0.0
+            for j in range(i - period + 1, i + 1):
+                gain_sum += gains[j]
+                loss_sum += losses[j]
+            avg_gain = gain_sum / period
+            avg_loss = loss_sum / period
+            if avg_loss == 0:
+                rsi.append(100.0)
+            else:
+                rs = avg_gain / avg_loss
+                rsi.append(round(100 - 100 / (1 + rs), 2))
+        return rsi
+
+    def _detect_divergence(self, price_rows, indicator_values, lookback_period=5):
+        top_divergence = []
+        bottom_divergence = []
+        closes = [item['close'] for item in price_rows]
+
+        def find_local_extremes(values, is_max=True):
+            extremes = []
+            for i in range(lookback_period, len(values) - lookback_period):
+                if values[i] is None:
+                    continue
+                is_extreme = True
+                for j in range(1, lookback_period + 1):
+                    left = values[i - j]
+                    right = values[i + j]
+                    if left is None or right is None:
+                        is_extreme = False
+                        break
+                    if is_max:
+                        if values[i] < left or values[i] < right:
+                            is_extreme = False
+                            break
+                    else:
+                        if values[i] > left or values[i] > right:
+                            is_extreme = False
+                            break
+                if is_extreme:
+                    extremes.append({'index': i, 'value': values[i]})
+            return extremes
+
+        price_highs = find_local_extremes(closes, True)
+        price_lows = find_local_extremes(closes, False)
+        indicator_highs = find_local_extremes(indicator_values, True)
+        indicator_lows = find_local_extremes(indicator_values, False)
+
+        for i in range(1, len(price_highs)):
+            current_price_high = price_highs[i]
+            prev_price_high = price_highs[i - 1]
+            if current_price_high['value'] <= prev_price_high['value']:
+                continue
+            matched = [h for h in indicator_highs if prev_price_high['index'] <= h['index'] <= current_price_high['index']]
+            if len(matched) < 2:
+                continue
+            last_two = matched[-2:]
+            if last_two[1]['value'] < last_two[0]['value']:
+                top_divergence.append({
+                    'index': current_price_high['index'],
+                    'priceValue': current_price_high['value'],
+                    'indicatorValue': indicator_values[current_price_high['index']],
+                })
+
+        for i in range(1, len(price_lows)):
+            current_price_low = price_lows[i]
+            prev_price_low = price_lows[i - 1]
+            if current_price_low['value'] >= prev_price_low['value']:
+                continue
+            matched = [l for l in indicator_lows if prev_price_low['index'] <= l['index'] <= current_price_low['index']]
+            if len(matched) < 2:
+                continue
+            last_two = matched[-2:]
+            if last_two[1]['value'] > last_two[0]['value']:
+                bottom_divergence.append({
+                    'index': current_price_low['index'],
+                    'priceValue': current_price_low['value'],
+                    'indicatorValue': indicator_values[current_price_low['index']],
+                })
+
+        return {'top': top_divergence, 'bottom': bottom_divergence}
+
+    def _format_signal_time(self, raw_time):
+        value = str(raw_time or '').strip()
+        if not value:
+            return ''
+        if re.fullmatch(r'\d{12}', value):
+            return f"{value[0:4]}-{value[4:6]}-{value[6:8]} {value[8:10]}:{value[10:12]}"
+        if re.fullmatch(r'\d{8}', value):
+            return f"{value[0:4]}-{value[4:6]}-{value[6:8]}"
+        return value
 
     def _is_price_in_trigger_range(self, stock, current_price):
         cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
