@@ -844,9 +844,14 @@ class AlertChecker:
         return alerts
 
     def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6):
-        # if window == 1:
-        #     return None
         """检查RSI边界条件"""
+        # 取消 1 分钟 RSI 越界（<20 或 >70）告警，避免高频噪声。
+        if window == 1:
+            state_key = f"{stock}_{window}"
+            if state_key in self._rsi_trigger_states:
+                self._rsi_trigger_states[state_key]['last_rsi_triggered'] = False
+            return None
+
         state_key = f"{stock}_{window}"
         if state_key not in self._rsi_trigger_states:
             self._rsi_trigger_states[state_key] = {'last_rsi_triggered': False}
@@ -870,6 +875,10 @@ class AlertChecker:
 
     def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_6, last_k, prev_k):
         """检查RSI极端值的K线模式"""
+        # 1 分钟级别不再监控 RSI 20/70 相关模式（rsi_6_up / rsi_6_down）。
+        if window == 1:
+            return []
+
         alerts = []
 
         # RSI低位反弹模式
