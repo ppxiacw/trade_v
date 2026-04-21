@@ -56,6 +56,21 @@ _THS_PROFILE_CACHE: Dict[str, Dict[str, Any]] = {}
 _THS_PROFILE_ITEM_TTL_SECONDS = 6 * 60 * 60
 _THS_PROFILE_FALLBACK_FETCH_CAP = 160
 _THS_CONCEPT_MAX_ITEMS = 8
+_THS_THEME_TREND_CACHE: Dict[str, Any] = {
+    "expire_at": 0.0,
+    "industry": {},
+    "concept": {},
+    "fetched_at": "",
+    "source": "",
+}
+_THS_THEME_TREND_CACHE_TTL_SECONDS = 2 * 60
+_EM_THEME_TREND_CACHE: Dict[str, Any] = {
+    "expire_at": 0.0,
+    "industry": {},
+    "concept": {},
+    "fetched_at": "",
+}
+_EM_THEME_TREND_CACHE_TTL_SECONDS = 2 * 60
 _NOTICE_ITEM_CACHE: Dict[str, Dict[str, Any]] = {}
 _NOTICE_ITEM_TTL_SECONDS = 30 * 60
 _NOTICE_BATCH_SIZE = 20
@@ -84,6 +99,13 @@ def _safe_float(x: Any) -> Optional[float]:
         return v
     except (TypeError, ValueError):
         return None
+
+
+def _safe_pct_float(x: Any) -> Optional[float]:
+    if isinstance(x, str):
+        normalized = x.strip().replace("%", "").replace(",", "")
+        return _safe_float(normalized)
+    return _safe_float(x)
 
 
 def ts_to_gtimg_symbol(ts_code: str) -> Optional[str]:
@@ -466,6 +488,451 @@ def _load_ths_profile_map(ts_codes: List[str], fetch_cap: int = _THS_PROFILE_FAL
             out[ts_code] = profile
 
     return out
+
+
+def _normalize_theme_name(name: Any) -> str:
+    text = str(name or "").strip().lower()
+    if not text:
+        return ""
+    text = text.replace("（", "(").replace("）", ")")
+    text = text.replace("－", "-").replace("—", "-")
+    text = re.sub(r"\s+", "", text)
+    return text
+
+
+def _pick_first_existing_column(columns: List[str], candidates: List[str]) -> Optional[str]:
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    return None
+
+
+def _load_eastmoney_theme_trend_maps() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """
+    东方财富板块/概念涨跌榜兜底：
+    - 行业: fs=m:90+t:2
+    - 概念: fs=m:90+t:3
+    """
+
+    now = time.time()
+    cached = _EM_THEME_TREND_CACHE
+    if (
+        now < float(cached.get("expire_at", 0) or 0)
+        and isinstance(cached.get("industry"), dict)
+        and isinstance(cached.get("concept"), dict)
+    ):
+        return cached.get("industry") or {}, cached.get("concept") or {}
+
+    def fetch_theme_map(fs: str, theme_type: str) -> Dict[str, Dict[str, Any]]:
+        session = requests.Session()
+        session.trust_env = False
+        _disable_proxy_for_requests()
+
+        out: Dict[str, Dict[str, Any]] = {}
+        page_size = 200
+        for page_no in range(1, 16):
+            url = (
+                "https://79.push2.eastmoney.com/api/qt/clist/get"
+                f"?pn={page_no}&pz={page_size}&po=1&np=1&fltt=2&invt=2&fid=f3"
+                f"&fs={fs}&fields=f12,f14,f3"
+            )
+            try:
+                resp = session.get(url, timeout=15, headers=_EM_HEADERS)
+                resp.raise_for_status()
+                payload = resp.json()
+                diff = (((payload or {}).get("data") or {}).get("diff")) or []
+                if not isinstance(diff, list):
+                    diff = []
+            except Exception:
+                break
+
+            if not diff:
+                break
+
+            for item in diff:
+                theme_name = str((item or {}).get("f14") or "").strip()
+                if not theme_name:
+                    continue
+                normalized_name = _normalize_theme_name(theme_name)
+                if not normalized_name:
+                    continue
+                pct_value = _safe_pct_float((item or {}).get("f3"))
+                index_code = str((item or {}).get("f12") or "").strip()
+                out[normalized_name] = {
+                    "name": theme_name,
+                    "pct_chg": pct_value,
+                    "index_code": index_code or None,
+                    "lead_stock": None,
+                    "theme_type": theme_type,
+                }
+
+            if len(diff) < page_size:
+                break
+            time.sleep(0.03)
+        return out
+
+    industry_map = fetch_theme_map("m:90+t:2", "industry")
+    concept_map = fetch_theme_map("m:90+t:3", "concept")
+    if industry_map or concept_map:
+        _EM_THEME_TREND_CACHE["industry"] = industry_map
+        _EM_THEME_TREND_CACHE["concept"] = concept_map
+        _EM_THEME_TREND_CACHE["fetched_at"] = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+        _EM_THEME_TREND_CACHE["expire_at"] = time.time() + _EM_THEME_TREND_CACHE_TTL_SECONDS
+        return industry_map, concept_map
+
+    cached_industry = cached.get("industry") if isinstance(cached.get("industry"), dict) else {}
+    cached_concept = cached.get("concept") if isinstance(cached.get("concept"), dict) else {}
+    if cached_industry or cached_concept:
+        _EM_THEME_TREND_CACHE["expire_at"] = time.time() + 30
+        return cached_industry, cached_concept
+    return {}, {}
+
+
+def _load_ths_theme_trend_maps() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]], str, str]:
+    now = time.time()
+    cached = _THS_THEME_TREND_CACHE
+    if (
+        now < float(cached.get("expire_at", 0) or 0)
+        and isinstance(cached.get("industry"), dict)
+        and isinstance(cached.get("concept"), dict)
+    ):
+        return (
+            cached.get("industry") or {},
+            cached.get("concept") or {},
+            str(cached.get("fetched_at") or ""),
+            str(cached.get("source") or ""),
+        )
+
+    industry_map: Dict[str, Dict[str, Any]] = {}
+    concept_map: Dict[str, Dict[str, Any]] = {}
+    fetched_at = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+    source = ""
+
+    try:
+        import akshare as ak
+
+        industry_df = ak.stock_board_industry_name_ths()
+        concept_df = ak.stock_board_concept_name_ths()
+
+        def build_map(df: Any, is_concept: bool) -> Dict[str, Dict[str, Any]]:
+            out: Dict[str, Dict[str, Any]] = {}
+            if df is None or getattr(df, "empty", True):
+                return out
+            columns = [str(col) for col in list(getattr(df, "columns", []))]
+            name_col = _pick_first_existing_column(
+                columns,
+                ["行业", "概念名称", "概念", "板块", "名称"],
+            )
+            pct_col = _pick_first_existing_column(columns, ["涨跌幅", "涨跌幅(%)", "涨幅", "最新涨跌幅"])
+            index_col = _pick_first_existing_column(columns, ["行业指数", "概念指数", "指数代码", "代码"])
+            lead_col = _pick_first_existing_column(columns, ["领涨股票", "领涨股", "领涨个股"])
+            if not name_col:
+                return out
+
+            for item in df.to_dict(orient="records"):
+                theme_name = str((item or {}).get(name_col) or "").strip()
+                if not theme_name:
+                    continue
+                normalized_name = _normalize_theme_name(theme_name)
+                if not normalized_name:
+                    continue
+                pct_value = _safe_pct_float((item or {}).get(pct_col)) if pct_col else None
+                index_code = str((item or {}).get(index_col) or "").strip() if index_col else ""
+                lead_stock = str((item or {}).get(lead_col) or "").strip() if lead_col else ""
+                out[normalized_name] = {
+                    "name": theme_name,
+                    "pct_chg": pct_value,
+                    "index_code": index_code or None,
+                    "lead_stock": lead_stock or None,
+                    "theme_type": "concept" if is_concept else "industry",
+                }
+            return out
+
+        industry_map = build_map(industry_df, is_concept=False)
+        concept_map = build_map(concept_df, is_concept=True)
+        if industry_map or concept_map:
+            source = "ths_akshare"
+    except Exception as e:
+        logger.warning("加载同花顺板块/概念走势失败: %s", e)
+
+    if not industry_map and not concept_map:
+        try:
+            industry_map, concept_map = _load_eastmoney_theme_trend_maps()
+            if industry_map or concept_map:
+                source = "eastmoney_fallback"
+        except Exception as e:
+            logger.warning("东方财富板块/概念走势兜底失败: %s", e)
+
+    if industry_map or concept_map:
+        _THS_THEME_TREND_CACHE["industry"] = industry_map
+        _THS_THEME_TREND_CACHE["concept"] = concept_map
+        _THS_THEME_TREND_CACHE["fetched_at"] = fetched_at
+        _THS_THEME_TREND_CACHE["source"] = source
+        _THS_THEME_TREND_CACHE["expire_at"] = time.time() + _THS_THEME_TREND_CACHE_TTL_SECONDS
+        return industry_map, concept_map, fetched_at, source
+
+    # 拉取失败时沿用旧缓存，避免页面突然空白。
+    cached_industry = cached.get("industry") if isinstance(cached.get("industry"), dict) else {}
+    cached_concept = cached.get("concept") if isinstance(cached.get("concept"), dict) else {}
+    if cached_industry or cached_concept:
+        _THS_THEME_TREND_CACHE["expire_at"] = time.time() + 30
+        return (
+            cached_industry,
+            cached_concept,
+            str(cached.get("fetched_at") or fetched_at),
+            str(cached.get("source") or ""),
+        )
+
+    _THS_THEME_TREND_CACHE["industry"] = {}
+    _THS_THEME_TREND_CACHE["concept"] = {}
+    _THS_THEME_TREND_CACHE["fetched_at"] = fetched_at
+    _THS_THEME_TREND_CACHE["source"] = ""
+    _THS_THEME_TREND_CACHE["expire_at"] = time.time() + 20
+    return {}, {}, fetched_at, ""
+
+
+def _split_board_candidates(board_text: Any) -> List[str]:
+    text = str(board_text or "").strip()
+    if not text:
+        return []
+    parts = [seg.strip() for seg in re.split(r"\s*--\s*|[>/｜|]+", text) if seg and seg.strip()]
+    candidates: List[str] = []
+    for part in reversed(parts):
+        if part not in candidates:
+            candidates.append(part)
+    if text not in candidates:
+        candidates.append(text)
+    return candidates
+
+
+def _split_concept_candidates(concept_text: Any) -> List[str]:
+    text = str(concept_text or "").strip()
+    if not text:
+        return []
+    parts = [seg.strip() for seg in re.split(r"[，,、/|；;]+", text) if seg and seg.strip()]
+    candidates: List[str] = []
+    for part in parts:
+        if part not in candidates:
+            candidates.append(part)
+    if text not in candidates:
+        candidates.append(text)
+    return candidates
+
+
+def _pick_theme_trend(candidates: List[str], trend_map: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    for candidate in candidates:
+        matched = trend_map.get(_normalize_theme_name(candidate))
+        if matched:
+            return matched
+    return None
+
+
+def _enrich_rows_with_ths_theme_trend(rows: List[dict]) -> Dict[str, Any]:
+    for row in rows:
+        row["board_trend_name"] = None
+        row["board_trend_pct"] = None
+        row["board_trend_index_code"] = None
+        row["board_trend_lead_stock"] = None
+        row["concept_trend_name"] = None
+        row["concept_trend_pct"] = None
+        row["concept_trend_index_code"] = None
+        row["concept_trend_lead_stock"] = None
+
+    if not rows:
+        return {
+            "enabled": False,
+            "board_matched": 0,
+            "concept_matched": 0,
+            "fetched_at": "",
+            "source": "",
+        }
+
+    industry_map, concept_map, fetched_at, source = _load_ths_theme_trend_maps()
+    if not industry_map and not concept_map:
+        return {
+            "enabled": False,
+            "board_matched": 0,
+            "concept_matched": 0,
+            "fetched_at": fetched_at,
+            "source": source,
+        }
+
+    board_matched = 0
+    concept_matched = 0
+    for row in rows:
+        board_match = _pick_theme_trend(_split_board_candidates(row.get("board")), industry_map)
+        if board_match:
+            row["board_trend_name"] = board_match.get("name")
+            row["board_trend_pct"] = board_match.get("pct_chg")
+            row["board_trend_index_code"] = board_match.get("index_code")
+            row["board_trend_lead_stock"] = board_match.get("lead_stock")
+            board_matched += 1
+
+        concept_match = _pick_theme_trend(_split_concept_candidates(row.get("concept")), concept_map)
+        if concept_match:
+            row["concept_trend_name"] = concept_match.get("name")
+            row["concept_trend_pct"] = concept_match.get("pct_chg")
+            row["concept_trend_index_code"] = concept_match.get("index_code")
+            row["concept_trend_lead_stock"] = concept_match.get("lead_stock")
+            concept_matched += 1
+
+    return {
+        "enabled": True,
+        "board_matched": board_matched,
+        "concept_matched": concept_matched,
+        "fetched_at": fetched_at,
+        "source": source,
+    }
+
+
+def _normalize_theme_type(theme_type: Any) -> str:
+    raw = str(theme_type or "").strip().lower()
+    if raw in {"industry", "board", "hy"}:
+        return "industry"
+    if raw in {"concept", "gn"}:
+        return "concept"
+    return "industry"
+
+
+def _normalize_theme_code(theme_code: Any) -> str:
+    code = str(theme_code or "").strip().upper()
+    if not code:
+        return ""
+    if "." in code:
+        suffix = code.split(".")[-1].strip().upper()
+        if suffix.startswith("BK"):
+            return suffix
+    return code
+
+
+def _resolve_theme_index_code(theme_type: str, theme_code: str, theme_name: str) -> str:
+    normalized_code = _normalize_theme_code(theme_code)
+    if normalized_code.startswith("BK"):
+        return normalized_code
+
+    target_map = {}
+    industry_map, concept_map, _, _ = _load_ths_theme_trend_maps()
+    if theme_type == "concept":
+        target_map = concept_map
+    else:
+        target_map = industry_map
+
+    normalized_name = _normalize_theme_name(theme_name)
+    if normalized_name and normalized_name in target_map:
+        candidate = _normalize_theme_code(target_map[normalized_name].get("index_code"))
+        if candidate.startswith("BK"):
+            return candidate
+
+    em_industry_map, em_concept_map = _load_eastmoney_theme_trend_maps()
+    em_map = em_concept_map if theme_type == "concept" else em_industry_map
+    if normalized_name and normalized_name in em_map:
+        candidate = _normalize_theme_code(em_map[normalized_name].get("index_code"))
+        if candidate.startswith("BK"):
+            return candidate
+
+    if normalized_code.startswith("BK"):
+        return normalized_code
+    raise ValueError("未找到可用的板块/概念指数代码")
+
+
+def _fetch_theme_kline_rows_from_eastmoney(index_code: str, period: str, limit: int) -> Tuple[List[dict], Dict[str, Any]]:
+    period_to_klt = {
+        "time": "1",
+        "m1": "1",
+        "m5": "5",
+        "m15": "15",
+        "m30": "30",
+        "day": "101",
+        "week": "102",
+        "month": "103",
+    }
+    klt = period_to_klt.get(period, "101")
+    secid = f"90.{index_code}"
+    lmt = max(20, min(int(limit or 240), 800))
+
+    session = requests.Session()
+    session.trust_env = False
+    _disable_proxy_for_requests()
+    params = {
+        "secid": secid,
+        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+        "fields1": "f1,f2,f3,f4,f5,f6,f7,f8",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": klt,
+        "fqt": "1",
+        "lmt": str(lmt),
+        "end": "20500101",
+    }
+    resp = session.get(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+        params=params,
+        headers=_EM_HEADERS,
+        timeout=18,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    data = (payload or {}).get("data") or {}
+    if not data:
+        return [], {"theme_name": "", "index_code": index_code, "source": "eastmoney_push2his"}
+
+    out: List[dict] = []
+    for row in data.get("klines") or []:
+        parts = str(row or "").split(",")
+        if len(parts) < 6:
+            continue
+        open_price = _safe_float(parts[1])
+        close_price = _safe_float(parts[2])
+        high_price = _safe_float(parts[3])
+        low_price = _safe_float(parts[4])
+        volume = _safe_float(parts[5])
+        amount = _safe_float(parts[6]) if len(parts) > 6 else None
+        pct_chg = _safe_pct_float(parts[8]) if len(parts) > 8 else None
+        if None in (open_price, close_price, high_price, low_price):
+            continue
+        out.append(
+            {
+                "date": parts[0],
+                "open": open_price,
+                "close": close_price,
+                "high": high_price,
+                "low": low_price,
+                "volume": volume,
+                "amount": amount,
+                "pct_chg": pct_chg,
+            }
+        )
+
+    return out, {
+        "theme_name": str(data.get("name") or "").strip(),
+        "index_code": str(data.get("code") or index_code).strip(),
+        "source": "eastmoney_push2his",
+    }
+
+
+def load_theme_kline_data(
+    theme_type: str,
+    theme_code: str = "",
+    theme_name: str = "",
+    period: str = "day",
+    limit: int = 240,
+) -> Tuple[List[dict], Dict[str, Any]]:
+    normalized_type = _normalize_theme_type(theme_type)
+    normalized_period = str(period or "day").strip().lower()
+    if normalized_period not in {"time", "m1", "m5", "m15", "m30", "day", "week", "month"}:
+        normalized_period = "day"
+
+    index_code = _resolve_theme_index_code(normalized_type, theme_code, theme_name)
+    rows, extra_meta = _fetch_theme_kline_rows_from_eastmoney(index_code, normalized_period, limit)
+    meta = {
+        "theme_type": normalized_type,
+        "theme_code": index_code,
+        "theme_name": extra_meta.get("theme_name") or str(theme_name or "").strip(),
+        "period": normalized_period,
+        "count": len(rows),
+        "source": extra_meta.get("source") or "eastmoney_push2his",
+        "fetched_at": datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds"),
+    }
+    return rows, meta
 
 
 def _fetch_notice_batch(pure_codes: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
@@ -1328,6 +1795,8 @@ def screen_stocks_by_mv_and_pct(
             if ((not board_before and row.get("board")) or (not concept_before and row.get("concept"))):
                 ths_fallback_filled += 1
 
+    ths_theme_trend_stats = _enrich_rows_with_ths_theme_trend(rows)
+
     meta: Dict[str, Any] = {
         "fetched_at": fetched_at,
         "source": "qt.gtimg.cn (Tencent, same vendor family as K-line fqkline)",
@@ -1339,6 +1808,11 @@ def screen_stocks_by_mv_and_pct(
         "total_after_filter": len(rows),
         "em_profile_non_empty": em_profile_non_empty,
         "ths_fallback_filled": ths_fallback_filled,
+        "ths_theme_trend_enabled": bool(ths_theme_trend_stats.get("enabled")),
+        "ths_theme_board_matched": int(ths_theme_trend_stats.get("board_matched", 0) or 0),
+        "ths_theme_concept_matched": int(ths_theme_trend_stats.get("concept_matched", 0) or 0),
+        "ths_theme_fetched_at": ths_theme_trend_stats.get("fetched_at") or "",
+        "ths_theme_source": ths_theme_trend_stats.get("source") or "",
         "exclude_star_board": True,
         "exclude_note": "已排除科创板（代码 688 开头）",
     }
@@ -1362,6 +1836,7 @@ def screen_stocks_by_mv_and_pct(
                     "历史日期模式下，总市值按“当日收盘价 × 当前估算总股本”换算，"
                     "为近似值。"
                 ),
+                "ths_theme_note": "板块/概念走势优先同花顺，失败时回退东方财富实时榜单，与历史筛选日期不强绑定。",
             }
         )
     return rows, meta

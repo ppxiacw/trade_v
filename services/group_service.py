@@ -34,6 +34,13 @@ _GROUP_CACHE_TTL_SECONDS = {
     True: 60.0,
     False: 120.0,
 }
+# /api/groups/<id> 与 /api/groups/code/<code> 查询缓存（短 TTL）
+_GROUP_DETAIL_CACHE_LOCK = Lock()
+_GROUP_DETAIL_CACHE = {}
+_GROUP_DETAIL_CACHE_TTL_SECONDS = {
+    True: 30.0,
+    False: 120.0,
+}
 _GROUP_INDEX_INIT_LOCK = Lock()
 _GROUP_INDEX_INIT_DONE = False
 
@@ -58,10 +65,33 @@ def _set_cached_groups(include_stocks, groups):
         }
 
 
+def _get_cached_group_detail(cache_key):
+    now = time.time()
+    with _GROUP_DETAIL_CACHE_LOCK:
+        entry = _GROUP_DETAIL_CACHE.get(cache_key)
+        if not entry:
+            return None
+        if entry['data'] is None or entry['expire_at'] <= now:
+            _GROUP_DETAIL_CACHE.pop(cache_key, None)
+            return None
+        return deepcopy(entry['data'])
+
+
+def _set_cached_group_detail(cache_key, include_stocks, group_detail):
+    ttl = _GROUP_DETAIL_CACHE_TTL_SECONDS.get(include_stocks, 20.0)
+    with _GROUP_DETAIL_CACHE_LOCK:
+        _GROUP_DETAIL_CACHE[cache_key] = {
+            'expire_at': time.time() + ttl,
+            'data': deepcopy(group_detail),
+        }
+
+
 def _invalidate_group_cache():
     with _GROUP_CACHE_LOCK:
         _GROUP_CACHE[True] = {'expire_at': 0.0, 'data': None}
         _GROUP_CACHE[False] = {'expire_at': 0.0, 'data': None}
+    with _GROUP_DETAIL_CACHE_LOCK:
+        _GROUP_DETAIL_CACHE.clear()
 
 
 def _ensure_group_indexes_once():
@@ -225,16 +255,23 @@ def get_all_groups(include_stocks=True):
             conn.close()
 
 
-def get_group(group_id):
+def get_group(group_id, include_stocks=True):
     """
     获取单个分组详情
     
     Args:
         group_id: 分组ID
+        include_stocks: 是否返回股票明细（False 时仅返回 stock_count）
         
     Returns:
         dict: 分组详情
     """
+    _ensure_group_indexes_once()
+    cache_key = ('id', int(group_id), bool(include_stocks))
+    cached = _get_cached_group_detail(cache_key)
+    if cached is not None:
+        return cached
+
     conn = None
     cursor = None
     
@@ -247,19 +284,27 @@ def get_group(group_id):
         
         if group:
             # 处理日期时间序列化
-            for key, value in group.items():
-                if isinstance(value, datetime):
-                    group[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-            
-            # 获取股票列表
-            cursor.execute(
-                """SELECT id, stock_code, stock_name, sort_order 
-                   FROM stock_group_items 
-                   WHERE group_id = %s 
-                   ORDER BY sort_order, id""",
-                (group_id,)
-            )
-            group['stocks'] = cursor.fetchall()
+            _serialize_group_datetimes(group)
+
+            if include_stocks:
+                cursor.execute(
+                    """SELECT id, stock_code, stock_name, sort_order
+                       FROM stock_group_items
+                       WHERE group_id = %s
+                       ORDER BY sort_order, id""",
+                    (group_id,)
+                )
+                stocks = cursor.fetchall()
+                group['stocks'] = stocks
+                group['stock_count'] = len(stocks)
+            else:
+                cursor.execute(
+                    "SELECT COUNT(*) AS stock_count FROM stock_group_items WHERE group_id = %s",
+                    (group_id,),
+                )
+                count_row = cursor.fetchone() or {}
+                group['stock_count'] = int(count_row.get('stock_count') or 0)
+            _set_cached_group_detail(cache_key, include_stocks, group)
             
         return group
         
@@ -274,16 +319,23 @@ def get_group(group_id):
             conn.close()
 
 
-def get_group_by_code(group_code):
+def get_group_by_code(group_code, include_stocks=True):
     """
     根据分组代码获取分组
     
     Args:
         group_code: 分组代码
+        include_stocks: 是否返回股票明细（False 时仅返回 stock_count）
         
     Returns:
         dict: 分组详情
     """
+    _ensure_group_indexes_once()
+    cache_key = ('code', str(group_code), bool(include_stocks))
+    cached = _get_cached_group_detail(cache_key)
+    if cached is not None:
+        return cached
+
     conn = None
     cursor = None
     
@@ -295,18 +347,28 @@ def get_group_by_code(group_code):
         group = cursor.fetchone()
         
         if group:
-            for key, value in group.items():
-                if isinstance(value, datetime):
-                    group[key] = value.strftime('%Y-%m-%d %H:%M:%S')
-            
-            cursor.execute(
-                """SELECT id, stock_code, stock_name, sort_order 
-                   FROM stock_group_items 
-                   WHERE group_id = %s 
-                   ORDER BY sort_order, id""",
-                (group['id'],)
-            )
-            group['stocks'] = cursor.fetchall()
+            _serialize_group_datetimes(group)
+
+            if include_stocks:
+                cursor.execute(
+                    """SELECT id, stock_code, stock_name, sort_order
+                       FROM stock_group_items
+                       WHERE group_id = %s
+                       ORDER BY sort_order, id""",
+                    (group['id'],)
+                )
+                stocks = cursor.fetchall()
+                group['stocks'] = stocks
+                group['stock_count'] = len(stocks)
+            else:
+                cursor.execute(
+                    "SELECT COUNT(*) AS stock_count FROM stock_group_items WHERE group_id = %s",
+                    (group['id'],),
+                )
+                count_row = cursor.fetchone() or {}
+                group['stock_count'] = int(count_row.get('stock_count') or 0)
+
+            _set_cached_group_detail(cache_key, include_stocks, group)
             
         return group
         

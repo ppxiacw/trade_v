@@ -2,6 +2,7 @@
 股票分组相关路由
 """
 import logging
+import time
 
 from flask import Blueprint, request, jsonify
 from services import group_service
@@ -52,8 +53,11 @@ def get_groups():
 @group_bp.route('/groups/<int:group_id>', methods=['GET'])
 def get_group(group_id):
     """获取分组详情"""
+    start_ts = time.perf_counter()
     try:
-        group = group_service.get_group(group_id)
+        include_stocks_raw = request.args.get('include_stocks', 'true')
+        include_stocks = str(include_stocks_raw).lower() == 'true'
+        group = group_service.get_group(group_id, include_stocks=include_stocks)
         
         if group:
             return jsonify({'success': True, 'data': group})
@@ -63,13 +67,25 @@ def get_group(group_id):
     except Exception as e:
         _logger.exception('获取分组详情失败: group_id=%s', group_id)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+    finally:
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000
+        if elapsed_ms >= 500:
+            _logger.warning(
+                '分组详情接口较慢: group_id=%s include_stocks=%s cost_ms=%.2f',
+                group_id,
+                request.args.get('include_stocks', 'true'),
+                elapsed_ms,
+            )
 
 
 @group_bp.route('/groups/code/<string:group_code>', methods=['GET'])
 def get_group_by_code(group_code):
     """根据分组代码获取分组"""
+    start_ts = time.perf_counter()
     try:
-        group = group_service.get_group_by_code(group_code)
+        include_stocks_raw = request.args.get('include_stocks', 'true')
+        include_stocks = str(include_stocks_raw).lower() == 'true'
+        group = group_service.get_group_by_code(group_code, include_stocks=include_stocks)
         
         if group:
             return jsonify({'success': True, 'data': group})
@@ -79,6 +95,15 @@ def get_group_by_code(group_code):
     except Exception as e:
         _logger.exception('根据分组代码获取分组失败: group_code=%s', group_code)
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+    finally:
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000
+        if elapsed_ms >= 500:
+            _logger.warning(
+                '按代码获取分组接口较慢: group_code=%s include_stocks=%s cost_ms=%.2f',
+                group_code,
+                request.args.get('include_stocks', 'true'),
+                elapsed_ms,
+            )
 
 
 @group_bp.route('/groups', methods=['POST'])

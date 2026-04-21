@@ -12,6 +12,7 @@ from utils.common import format_stock_code
 from services.stock_screen_service import (
     screen_stocks_by_mv_and_pct,
     load_future_events_by_stock_codes,
+    load_theme_kline_data,
 )
 from services.daily_kline_sync_service import (
     start_daily_kline_full_sync,
@@ -154,6 +155,53 @@ def screen_future_events():
         return jsonify({
             'success': False,
             'message': f'未来事件补充失败，请稍后重试。详情: {str(e)}',
+        }), 503
+
+
+@stock_bp.route('/screen/theme_kline', methods=['GET'])
+def screen_theme_kline():
+    """
+    获取板块/概念K线（站内页面使用）。
+    参数：
+      theme_type: industry|concept
+      theme_code: BKxxxx（可选，优先）
+      theme_name: 主题名称（可选）
+      period: time|m1|m5|m15|m30|day|week|month
+      limit: 默认240，范围20~2000
+    """
+    try:
+        theme_type = (request.args.get('theme_type', default='industry', type=str) or '').strip()
+        theme_code = (request.args.get('theme_code', default='', type=str) or '').strip()
+        theme_name = (request.args.get('theme_name', default='', type=str) or '').strip()
+        period = (request.args.get('period', default='day', type=str) or '').strip()
+        limit = request.args.get('limit', default=240, type=int)
+        if limit < 20 or limit > 2000:
+            return jsonify({'success': False, 'message': 'limit 需在 20～2000 之间'}), 400
+        allowed_periods = {'time', 'm1', 'm5', 'm15', 'm30', 'day', 'week', 'month'}
+        if period.lower() not in allowed_periods:
+            return jsonify({'success': False, 'message': 'period 仅支持 time/m1/m5/m15/m30/day/week/month'}), 400
+        if not theme_code and not theme_name:
+            return jsonify({'success': False, 'message': 'theme_code 和 theme_name 不能同时为空'}), 400
+
+        rows, meta = load_theme_kline_data(
+            theme_type=theme_type,
+            theme_code=theme_code,
+            theme_name=theme_name,
+            period=period,
+            limit=limit,
+        )
+        return jsonify({
+            'success': True,
+            'data': rows,
+            'meta': meta,
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+    except Exception as e:
+        _logger.exception('screen_theme_kline 失败')
+        return jsonify({
+            'success': False,
+            'message': f'板块/概念K线拉取失败，请稍后重试。详情: {str(e)}',
         }), 503
 
 
