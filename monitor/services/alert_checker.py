@@ -932,7 +932,7 @@ class AlertChecker:
 
     def _check_triple_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k):
         """检查三根K线组合模式"""
-        if window == 1:
+        if window in (1, 5):
             return []
         alerts = []
 

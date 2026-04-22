@@ -966,6 +966,10 @@ def get_alert_history():
             conditions.append(
                 "EXISTS (SELECT 1 FROM stocks ms WHERE ms.is_monitor = 1 AND BINARY ms.stock_code = BINARY l.stock_code)"
             )
+        conditions.append(
+            "NOT (l.windows_sec IN (1, 5) AND (l.alert_message LIKE %s OR l.alert_message LIKE %s))"
+        )
+        params.extend(['%up_down_up%', '%down_up_down%'])
 
         cache_key = (
             f"monitor:alerts:{stock_code or ''}:{alert_type or ''}:"

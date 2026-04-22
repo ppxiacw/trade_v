@@ -174,7 +174,10 @@ def get_all_groups(include_stocks=True):
                 SELECT g.*
                 FROM stock_groups g
                 WHERE g.is_active = 1
-                ORDER BY g.sort_order, g.id
+                ORDER BY
+                    CASE WHEN g.group_code = 'common_index' THEN 0 ELSE 1 END,
+                    COALESCE(g.updated_at, g.created_at) DESC,
+                    g.id DESC
                 """
             )
             groups = cursor.fetchall()
@@ -217,7 +220,10 @@ def get_all_groups(include_stocks=True):
                 SELECT g.*
                 FROM stock_groups g
                 WHERE g.is_active = 1
-                ORDER BY g.sort_order, g.id
+                ORDER BY
+                    CASE WHEN g.group_code = 'common_index' THEN 0 ELSE 1 END,
+                    COALESCE(g.updated_at, g.created_at) DESC,
+                    g.id DESC
                 """
             )
             groups = cursor.fetchall()
