@@ -133,7 +133,7 @@ def _apply_divergence_defaults_to_stock(stock):
     stock['divergence_kline_count'] = max(120, kline_count) if kline_count is not None else 240
 
     lookback = _to_int_or_none(stock.get('divergence_lookback'))
-    stock['divergence_lookback'] = max(2, lookback) if lookback is not None else 5
+    stock['divergence_lookback'] = max(2, lookback) if lookback is not None else 3
 
 
 def _build_divergence_patch_from_payload(data):

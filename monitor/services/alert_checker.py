@@ -55,7 +55,7 @@ class AlertChecker:
             15, int(os.getenv('DIVERGENCE_SCAN_INTERVAL_SECONDS', '60'))
         )
         self._divergence_kline_count = max(120, int(os.getenv('DIVERGENCE_KLINE_COUNT', '240')))
-        self._divergence_lookback = max(2, int(os.getenv('DIVERGENCE_LOOKBACK', '5')))
+        self._divergence_lookback = max(2, int(os.getenv('DIVERGENCE_LOOKBACK', '3')))
         self._divergence_last_scan_at = {}
         self._divergence_last_signal = {}
         self._divergence_bootstrapped = set()
@@ -239,7 +239,7 @@ class AlertChecker:
         lookback = int(
             stock_divergence_cfg.get('lookback')
             or divergence_cfg.get('lookback')
-            or 5
+            or 3
         )
 
         if not periods:
@@ -288,14 +288,10 @@ class AlertChecker:
                 signal_key = f"{stock}|{period}|{indicator}|{divergence_type}|{signal_time}"
                 signal_items.append((indicator, divergence_type, point, row, signal_key))
 
-            # 首次扫描仅建立状态，不直接告警，避免服务重启后把历史信号当成新信号
+            # 首次扫描也允许最新信号触发，避免明显新信号被静默掉
             bootstrap_key = f"{stock}|{period}"
             if bootstrap_key not in self._divergence_bootstrapped:
-                for indicator, divergence_type, _, _, signal_key in signal_items:
-                    state_key = f"{stock}|{period}|{indicator}|{divergence_type}"
-                    self._divergence_last_signal[state_key] = signal_key
                 self._divergence_bootstrapped.add(bootstrap_key)
-                continue
 
             for indicator, divergence_type, point, row, signal_key in signal_items:
                 state_key = f"{stock}|{period}|{indicator}|{divergence_type}"
@@ -465,11 +461,15 @@ class AlertChecker:
                     continue
                 try:
                     close_value = float(item[2])
+                    high_value = float(item[3])
+                    low_value = float(item[4])
                 except (TypeError, ValueError):
                     continue
                 rows.append({
                     'time': str(item[0]),
                     'close': close_value,
+                    'high': high_value,
+                    'low': low_value,
                 })
             return rows
         except Exception as e:
@@ -538,10 +538,11 @@ class AlertChecker:
                 rsi.append(round(100 - 100 / (1 + rs), 2))
         return rsi
 
-    def _detect_divergence(self, price_rows, indicator_values, lookback_period=5):
+    def _detect_divergence(self, price_rows, indicator_values, lookback_period=3):
         top_divergence = []
         bottom_divergence = []
-        closes = [item['close'] for item in price_rows]
+        price_highs_raw = [item.get('high', item.get('close')) for item in price_rows]
+        price_lows_raw = [item.get('low', item.get('close')) for item in price_rows]
 
         def find_local_extremes(values, is_max=True):
             extremes = []
@@ -567,8 +568,8 @@ class AlertChecker:
                     extremes.append({'index': i, 'value': values[i]})
             return extremes
 
-        price_highs = find_local_extremes(closes, True)
-        price_lows = find_local_extremes(closes, False)
+        price_highs = find_local_extremes(price_highs_raw, True)
+        price_lows = find_local_extremes(price_lows_raw, False)
         indicator_highs = find_local_extremes(indicator_values, True)
         indicator_lows = find_local_extremes(indicator_values, False)
 
