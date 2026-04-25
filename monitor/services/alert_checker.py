@@ -931,32 +931,8 @@ class AlertChecker:
         return None
 
     def _check_triple_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k):
-        """检查三根K线组合模式"""
-        if window in (1, 5):
-            return []
-        alerts = []
-
-        # 阳-阴-阳组合
-        if (prev_prev_k['close'] > prev_prev_k['open'] and
-                prev_k['close'] < prev_k['open'] and
-                last_k['close'] > last_k['open'] and
-                prev_prev_k['amount'] > prev_k['amount'] and
-                last_k['amount'] > prev_k['amount']):
-            alerts.append(self._create_alert_data(
-                stock, f"({window}min)up_down_up", window, '买点'
-            ))
-
-        # 阴-阳-阴组合
-        if (prev_prev_k['close'] < prev_prev_k['open'] and
-                prev_k['close'] > prev_k['open'] and
-                last_k['close'] < last_k['open'] and
-                prev_prev_k['amount'] > prev_k['amount'] and
-                last_k['amount'] > prev_k['amount']):
-            alerts.append(self._create_alert_data(
-                stock, f"({window}min)down_up_down", window, '卖点'
-            ))
-
-        return alerts
+        """检查三根K线组合模式（已停用）"""
+        return []
 
     def _is_bullish_reversal(self, last_k, prev_k):
         """判断是否看涨反转形态"""

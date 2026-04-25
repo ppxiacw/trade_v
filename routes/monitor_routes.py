@@ -183,6 +183,15 @@ def _build_divergence_alert_message(period, indicator, divergence_type, signal_t
     return " | ".join(pieces)
 
 
+def _resolve_divergence_alert_type(divergence_type):
+    normalized = str(divergence_type or '').strip().lower()
+    if normalized == 'top':
+        return '顶背离'
+    if normalized == 'bottom':
+        return '底背离'
+    return '背离'
+
+
 def _get_divergence_cooldown(period):
     return _DIVERGENCE_COOLDOWN_SECONDS.get(period, 600)
 
@@ -193,11 +202,27 @@ def _format_datetime_for_client(value):
     return value
 
 
+def _normalize_alert_type_for_client(alert_type, alert_message):
+    normalized = str(alert_type or '').strip()
+    if normalized != '背离':
+        return normalized
+    message = str(alert_message or '')
+    if '顶背离' in message:
+        return '顶背离'
+    if '底背离' in message:
+        return '底背离'
+    return normalized
+
+
 def _serialize_alert_rows_for_client(rows):
     out = []
     for row in rows or []:
         item = dict(row)
         item['trigger_time'] = _format_datetime_for_client(item.get('trigger_time'))
+        item['alert_type'] = _normalize_alert_type_for_client(
+            item.get('alert_type'),
+            item.get('alert_message'),
+        )
         out.append(item)
     return out
 
@@ -852,7 +877,7 @@ def post_divergence_alert():
         alert_data = {
             'stock_code': stock_code,
             'stock_name': stock_display_name,
-            'alert_type': '背离',
+            'alert_type': _resolve_divergence_alert_type(divergence_type),
             'alert_level': 2,
             'alert_message': alert_message,
             'trigger_time': datetime.now(),
@@ -954,8 +979,16 @@ def get_alert_history():
             conditions.append("l.stock_code = %s")
             params.append(stock_code)
         if alert_type:
-            conditions.append("l.alert_type = %s")
-            params.append(alert_type)
+            if alert_type == '背离':
+                conditions.append("(l.alert_type IN (%s, %s, %s))")
+                params.extend(['背离', '顶背离', '底背离'])
+            elif alert_type in {'顶背离', '底背离'}:
+                message_keyword = '%顶背离%' if alert_type == '顶背离' else '%底背离%'
+                conditions.append("(l.alert_type = %s OR (l.alert_type = %s AND l.alert_message LIKE %s))")
+                params.extend([alert_type, '背离', message_keyword])
+            else:
+                conditions.append("l.alert_type = %s")
+                params.append(alert_type)
         if start_time:
             conditions.append("l.trigger_time >= %s")
             params.append(start_time)
@@ -966,9 +999,7 @@ def get_alert_history():
             conditions.append(
                 "EXISTS (SELECT 1 FROM stocks ms WHERE ms.is_monitor = 1 AND BINARY ms.stock_code = BINARY l.stock_code)"
             )
-        conditions.append(
-            "NOT (l.windows_sec IN (1, 5) AND (l.alert_message LIKE %s OR l.alert_message LIKE %s))"
-        )
+        conditions.append("NOT (l.alert_message LIKE %s OR l.alert_message LIKE %s)")
         params.extend(['%up_down_up%', '%down_up_down%'])
 
         cache_key = (
@@ -1122,10 +1153,21 @@ def get_alert_stats():
         
         # 按告警类型分组统计
         type_query = """
-            SELECT alert_type, COUNT(*) as count 
-            FROM stock_alert_log 
+            SELECT
+                CASE
+                    WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
+                    WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
+                    ELSE alert_type
+                END AS alert_type,
+                COUNT(*) as count
+            FROM stock_alert_log
             WHERE trigger_time >= %s AND trigger_time < %s
-            GROUP BY alert_type
+            GROUP BY
+                CASE
+                    WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
+                    WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
+                    ELSE alert_type
+                END
             ORDER BY count DESC
         """
         type_stats = db_manager.execute_query(type_query, time_range_params)
