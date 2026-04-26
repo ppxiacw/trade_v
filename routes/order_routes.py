@@ -1,6 +1,7 @@
 """
 订单相关路由
 """
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 from services import order_service
 
@@ -128,14 +129,43 @@ def get_delivery_records():
     try:
         stock_code = request.args.get('stock_code')
         operation = request.args.get('operation')
-        try:
-            limit = int(request.args.get('limit', 200))
-        except (TypeError, ValueError):
-            return jsonify({'success': False, 'message': 'limit 必须是整数'}), 400
-        if limit < 1 or limit > 5000:
-            return jsonify({'success': False, 'message': 'limit 需在 1~5000 之间'}), 400
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        limit = None
+        raw_limit = request.args.get('limit')
+        if raw_limit is not None and str(raw_limit).strip() != '':
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'message': 'limit 必须是整数'}), 400
+            if limit < 1:
+                return jsonify({'success': False, 'message': 'limit 需大于0'}), 400
 
-        rows = order_service.get_delivery_records(stock_code=stock_code, operation=operation, limit=limit)
+        def normalize_date(raw_value, field_name):
+            text = str(raw_value or '').strip()
+            if not text:
+                return ''
+            if len(text) == 8 and text.isdigit():
+                text = f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+            try:
+                datetime.strptime(text, '%Y-%m-%d')
+            except ValueError:
+                raise ValueError(f'{field_name} 格式需为 YYYY-MM-DD')
+            return text
+
+        try:
+            normalized_start_date = normalize_date(start_date, 'start_date')
+            normalized_end_date = normalize_date(end_date, 'end_date')
+        except ValueError as ve:
+            return jsonify({'success': False, 'message': str(ve)}), 400
+
+        rows = order_service.get_delivery_records(
+            stock_code=stock_code,
+            operation=operation,
+            limit=limit,
+            start_date=normalized_start_date or None,
+            end_date=normalized_end_date or None,
+        )
         return jsonify({
             'success': True,
             'data': rows,

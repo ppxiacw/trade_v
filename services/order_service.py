@@ -651,7 +651,7 @@ def import_delivery_csv(file_storage):
             pass
 
 
-def get_delivery_records(stock_code=None, operation=None, limit=200):
+def get_delivery_records(stock_code=None, operation=None, limit=None, start_date=None, end_date=None):
     """查询交割单记录列表"""
     conn = None
     cursor = None
@@ -709,8 +709,17 @@ def get_delivery_records(stock_code=None, operation=None, limit=200):
             sql += " AND operation = %s"
             params.append(str(operation).strip())
 
-        sql += " ORDER BY trade_datetime DESC, id DESC LIMIT %s"
-        params.append(limit)
+        if start_date:
+            sql += " AND trade_datetime >= %s"
+            params.append(f"{str(start_date).strip()} 00:00:00")
+        if end_date:
+            sql += " AND trade_datetime <= %s"
+            params.append(f"{str(end_date).strip()} 23:59:59")
+
+        sql += " ORDER BY trade_datetime DESC, id DESC"
+        if limit is not None:
+            sql += " LIMIT %s"
+            params.append(int(limit))
 
         cursor.execute(sql, tuple(params))
         rows = cursor.fetchall()
