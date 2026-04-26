@@ -99,7 +99,78 @@ class AlertChecker:
         divergence_alerts = self._check_divergence_alerts(stock)
         alerts.extend(divergence_alerts)
 
-        return alerts
+        point_mode = self._get_point_monitor_mode(stock_cfg)
+        return [item for item in alerts if self._is_alert_allowed_by_point_mode(item, point_mode)]
+
+    def _get_point_monitor_mode(self, stock_cfg):
+        if not self._to_bool(stock_cfg.get('is_monitor'), True):
+            return 'off'
+        mode = str(stock_cfg.get('point_monitor_mode') or '').strip().lower()
+        if mode in {'buy', 'sell', 'both', 'off'}:
+            return mode
+        if self._to_bool(stock_cfg.get('point_monitor_enabled'), False):
+            return 'both'
+        return 'both'
+
+    def _extract_alert_payload(self, alert_item):
+        if isinstance(alert_item, dict):
+            return alert_item
+        if isinstance(alert_item, tuple) and alert_item and isinstance(alert_item[0], dict):
+            return alert_item[0]
+        return None
+
+    def _is_buy_side_alert(self, alert_payload):
+        alert_type = str(alert_payload.get('alert_type') or '').strip()
+        message = str(alert_payload.get('alert_message') or '')
+        if alert_type in {'买点', '底背离'}:
+            return True
+        if alert_type == '背离' and '底背离' in message:
+            return True
+        if alert_type == '观察':
+            lowered = message.lower()
+            if 'rsi_6_up' in lowered:
+                return True
+            if 'rsi_6:' in lowered:
+                match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
+                if match:
+                    try:
+                        return float(match.group(1)) <= 20
+                    except (TypeError, ValueError):
+                        return False
+        return False
+
+    def _is_sell_side_alert(self, alert_payload):
+        alert_type = str(alert_payload.get('alert_type') or '').strip()
+        message = str(alert_payload.get('alert_message') or '')
+        if alert_type in {'卖点', '顶背离'}:
+            return True
+        if alert_type == '背离' and '顶背离' in message:
+            return True
+        if alert_type == '观察':
+            lowered = message.lower()
+            if 'rsi_6_down' in lowered:
+                return True
+            if 'rsi_6:' in lowered:
+                match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
+                if match:
+                    try:
+                        return float(match.group(1)) >= 70
+                    except (TypeError, ValueError):
+                        return False
+        return False
+
+    def _is_alert_allowed_by_point_mode(self, alert_item, point_mode):
+        payload = self._extract_alert_payload(alert_item)
+        if not payload:
+            return False
+        mode = str(point_mode or 'both').strip().lower()
+        if mode == 'off':
+            return False
+        if mode == 'buy':
+            return self._is_buy_side_alert(payload)
+        if mode == 'sell':
+            return self._is_sell_side_alert(payload)
+        return self._is_buy_side_alert(payload) or self._is_sell_side_alert(payload)
 
     def _load_divergence_periods(self):
         raw = str(os.getenv('DIVERGENCE_MONITOR_PERIODS', 'm30') or '').strip().lower()
@@ -916,8 +987,9 @@ class AlertChecker:
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 current_state['last_rsi_triggered'] = True
+                alert_type = '买点' if rsi_6 <= 20 else '卖点'
                 return self._create_alert_data(
-                    stock, f"({window}min)rsi_6:{rsi_6}", window, '观察'
+                    stock, f"({window}min)rsi_6:{rsi_6}", window, alert_type
                 )
             else:
                 current_state['last_rsi_triggered'] = True

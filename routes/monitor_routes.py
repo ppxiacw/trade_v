@@ -86,6 +86,19 @@ def _to_int_or_none(value):
         return None
 
 
+def _normalize_point_monitor_mode(raw_value, default='both'):
+    text = str(raw_value or '').strip().lower()
+    if text in {'off', 'none', 'stop', 'disable', '停止监控', '关闭监控'}:
+        return 'off'
+    if text in {'buy', 'buy_only', 'only_buy', '仅买点'}:
+        return 'buy'
+    if text in {'sell', 'sell_only', 'only_sell', '仅卖点'}:
+        return 'sell'
+    if text in {'both', 'all', '买卖点', '都监视'}:
+        return 'both'
+    return default
+
+
 def _normalize_divergence_periods(periods):
     if isinstance(periods, str):
         matched = re.findall(r"m1|m5|m15|m30|day|week|month", periods.lower())
@@ -134,10 +147,40 @@ def _apply_divergence_defaults_to_stock(stock):
 
     lookback = _to_int_or_none(stock.get('divergence_lookback'))
     stock['divergence_lookback'] = max(2, lookback) if lookback is not None else 3
+    mode_default = 'both' if (
+        _to_bool(stock.get('point_monitor_enabled'))
+        or _to_bool(stock.get('common'))
+        or _to_bool(stock.get('divergence_enabled'))
+    ) else ('off' if not _to_bool(stock.get('is_monitor'), True) else 'both')
+    stock['point_monitor_mode'] = _normalize_point_monitor_mode(stock.get('point_monitor_mode'), mode_default)
+    stock['point_monitor_enabled'] = 0 if stock['point_monitor_mode'] == 'off' else 1
 
 
 def _build_divergence_patch_from_payload(data):
     patch = {}
+    if 'point_monitor_mode' in data:
+        mode = _normalize_point_monitor_mode(data.get('point_monitor_mode'), 'both')
+        patch['point_monitor_mode'] = mode
+        enabled = 0 if mode == 'off' else 1
+        patch['point_monitor_enabled'] = enabled
+        patch['common'] = enabled
+        patch['normal_movement'] = 0
+        patch['divergence_enabled'] = enabled
+        patch['divergence_macd_enabled'] = 1
+        patch['divergence_rsi_enabled'] = 1
+        patch['divergence_top_enabled'] = 1
+        patch['divergence_bottom_enabled'] = 1
+    if 'point_monitor_enabled' in data:
+        enabled = 1 if _to_bool(data.get('point_monitor_enabled')) else 0
+        patch['point_monitor_enabled'] = enabled
+        patch['point_monitor_mode'] = 'both' if enabled else 'off'
+        patch['common'] = enabled
+        patch['normal_movement'] = 0
+        patch['divergence_enabled'] = enabled
+        patch['divergence_macd_enabled'] = 1
+        patch['divergence_rsi_enabled'] = 1
+        patch['divergence_top_enabled'] = 1
+        patch['divergence_bottom_enabled'] = 1
     if 'divergence_enabled' in data:
         patch['divergence_enabled'] = 1 if _to_bool(data.get('divergence_enabled')) else 0
     if 'divergence_macd_enabled' in data:
@@ -204,9 +247,26 @@ def _format_datetime_for_client(value):
 
 def _normalize_alert_type_for_client(alert_type, alert_message):
     normalized = str(alert_type or '').strip()
+    message = str(alert_message or '')
+    if normalized == '观察':
+        lowered = message.lower()
+        if 'rsi_6_up' in lowered:
+            return '买点'
+        if 'rsi_6_down' in lowered:
+            return '卖点'
+        rsi_match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
+        if rsi_match:
+            try:
+                rsi_value = float(rsi_match.group(1))
+                if rsi_value <= 20:
+                    return '买点'
+                if rsi_value >= 70:
+                    return '卖点'
+            except (TypeError, ValueError):
+                pass
+        return normalized
     if normalized != '背离':
         return normalized
-    message = str(alert_message or '')
     if '顶背离' in message:
         return '顶背离'
     if '底背离' in message:
@@ -478,6 +538,8 @@ def _ensure_monitor_stock_columns_once():
                     'sort_order': "ALTER TABLE stocks ADD COLUMN sort_order INT NULL COMMENT '监控股票排序'",
                     'trigger_min_price': "ALTER TABLE stocks ADD COLUMN trigger_min_price DECIMAL(12,4) NULL COMMENT '告警触发最小价格'",
                     'trigger_max_price': "ALTER TABLE stocks ADD COLUMN trigger_max_price DECIMAL(12,4) NULL COMMENT '告警触发最大价格'",
+                    'point_monitor_enabled': "ALTER TABLE stocks ADD COLUMN point_monitor_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否仅监视买卖点'",
+                    'point_monitor_mode': "ALTER TABLE stocks ADD COLUMN point_monitor_mode VARCHAR(16) NOT NULL DEFAULT 'both' COMMENT '买卖点监视模式: both/buy/sell'",
                     'divergence_enabled': "ALTER TABLE stocks ADD COLUMN divergence_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用背离监控'",
                     'divergence_periods': "ALTER TABLE stocks ADD COLUMN divergence_periods VARCHAR(255) NULL COMMENT '背离监控周期(JSON数组)'",
                     'divergence_scan_interval_seconds': "ALTER TABLE stocks ADD COLUMN divergence_scan_interval_seconds INT NULL COMMENT '背离扫描间隔秒'",
@@ -982,6 +1044,26 @@ def get_alert_history():
             if alert_type == '背离':
                 conditions.append("(l.alert_type IN (%s, %s, %s))")
                 params.extend(['背离', '顶背离', '底背离'])
+            elif alert_type == '买点':
+                conditions.append(
+                    "(l.alert_type = %s OR (l.alert_type = %s AND (l.alert_message LIKE %s OR l.alert_message REGEXP %s)))"
+                )
+                params.extend([
+                    '买点',
+                    '观察',
+                    '%rsi_6_up%',
+                    'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)',
+                ])
+            elif alert_type == '卖点':
+                conditions.append(
+                    "(l.alert_type = %s OR (l.alert_type = %s AND (l.alert_message LIKE %s OR l.alert_message REGEXP %s)))"
+                )
+                params.extend([
+                    '卖点',
+                    '观察',
+                    '%rsi_6_down%',
+                    'rsi_6:[[:space:]]*([7-9][0-9](\\.[0-9]+)?)',
+                ])
             elif alert_type in {'顶背离', '底背离'}:
                 message_keyword = '%顶背离%' if alert_type == '顶背离' else '%底背离%'
                 conditions.append("(l.alert_type = %s OR (l.alert_type = %s AND l.alert_message LIKE %s))")
@@ -1155,6 +1237,10 @@ def get_alert_stats():
         type_query = """
             SELECT
                 CASE
+                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_up%' THEN '买点'
+                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_down%' THEN '卖点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([7-9][0-9](\\.[0-9]+)?)' THEN '卖点'
                     WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
                     WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
                     ELSE alert_type
@@ -1164,6 +1250,10 @@ def get_alert_stats():
             WHERE trigger_time >= %s AND trigger_time < %s
             GROUP BY
                 CASE
+                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_up%' THEN '买点'
+                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_down%' THEN '卖点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([7-9][0-9](\\.[0-9]+)?)' THEN '卖点'
                     WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
                     WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
                     ELSE alert_type
