@@ -644,6 +644,11 @@ def import_delivery_csv(file_storage):
                 cursor.close()
         except Exception:
             pass
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 
 def get_delivery_records(stock_code=None, operation=None, limit=200):
@@ -718,10 +723,11 @@ def get_delivery_records(stock_code=None, operation=None, limit=200):
         print(f"查询交割单记录失败: {e}")
         return []
     finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
         try:
             if conn:
                 conn.close()
