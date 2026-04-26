@@ -105,3 +105,57 @@ def cancel_order(order_id):
     except Exception as e:
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
+
+@order_bp.route('/orders/import-delivery', methods=['POST'])
+def import_delivery_orders():
+    """导入交割单（CSV）"""
+    try:
+        upload_file = request.files.get('file')
+        if upload_file is None:
+            return jsonify({'success': False, 'message': '请上传交割单CSV文件（file）'}), 400
+
+        result = order_service.import_delivery_csv(upload_file)
+        if result.get('success'):
+            return jsonify(result)
+        return jsonify(result), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+
+
+@order_bp.route('/delivery-records', methods=['GET'])
+def get_delivery_records():
+    """获取交割单记录列表"""
+    try:
+        stock_code = request.args.get('stock_code')
+        operation = request.args.get('operation')
+        try:
+            limit = int(request.args.get('limit', 200))
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': 'limit 必须是整数'}), 400
+        if limit < 1 or limit > 5000:
+            return jsonify({'success': False, 'message': 'limit 需在 1~5000 之间'}), 400
+
+        rows = order_service.get_delivery_records(stock_code=stock_code, operation=operation, limit=limit)
+        return jsonify({
+            'success': True,
+            'data': rows,
+            'total': len(rows),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+
+
+@order_bp.route('/delivery-records/import', methods=['POST'])
+def import_delivery_records():
+    """导入交割单记录（CSV）"""
+    try:
+        upload_file = request.files.get('file')
+        if upload_file is None:
+            return jsonify({'success': False, 'message': '请上传交割单CSV文件（file）'}), 400
+        result = order_service.import_delivery_csv(upload_file)
+        if result.get('success'):
+            return jsonify(result)
+        return jsonify(result), 400
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+
