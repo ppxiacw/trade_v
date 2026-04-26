@@ -14,6 +14,7 @@ _logger = logging.getLogger(__name__)
 @group_bp.route('/groups', methods=['GET'])
 def get_groups():
     """获取所有分组"""
+    start_ts = time.perf_counter()
     try:
         # 默认不携带 stocks，避免首屏大查询阻塞；需要明细时调用 /groups/<id>
         include_stocks_raw = request.args.get('include_stocks', 'false')
@@ -48,6 +49,15 @@ def get_groups():
             'degraded': True,
             'message': f'分组服务降级返回，错误: {str(e)}',
         }), 200
+    finally:
+        elapsed_ms = (time.perf_counter() - start_ts) * 1000
+        if elapsed_ms >= 500:
+            _logger.warning(
+                '分组列表接口较慢: include_stocks=%s total=%s cost_ms=%.2f',
+                request.args.get('include_stocks', 'false'),
+                len(groups) if 'groups' in locals() and isinstance(groups, list) else 'unknown',
+                elapsed_ms,
+            )
 
 
 @group_bp.route('/groups/<int:group_id>', methods=['GET'])

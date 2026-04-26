@@ -543,6 +543,7 @@ class AlertChecker:
         bottom_divergence = []
         price_highs_raw = [item.get('high', item.get('close')) for item in price_rows]
         price_lows_raw = [item.get('low', item.get('close')) for item in price_rows]
+        indicator_align_tolerance = 2
 
         def find_local_extremes(values, is_max=True):
             extremes = []
@@ -573,12 +574,45 @@ class AlertChecker:
         indicator_highs = find_local_extremes(indicator_values, True)
         indicator_lows = find_local_extremes(indicator_values, False)
 
+        def find_nearest_indicator_extreme(extremes, target_index):
+            candidates = [
+                item for item in extremes
+                if abs(int(item.get('index', -9999)) - int(target_index)) <= indicator_align_tolerance
+            ]
+            if not candidates:
+                return None
+            candidates.sort(
+                key=lambda item: (
+                    abs(int(item.get('index', 0)) - int(target_index)),
+                    int(item.get('index', 0))
+                )
+            )
+            return candidates[0]
+
         for i in range(1, len(price_highs)):
             current_price_high = price_highs[i]
             prev_price_high = price_highs[i - 1]
             if current_price_high['value'] <= prev_price_high['value']:
                 continue
-            matched = [h for h in indicator_highs if prev_price_high['index'] <= h['index'] <= current_price_high['index']]
+            prev_indicator_high = find_nearest_indicator_extreme(indicator_highs, prev_price_high['index'])
+            current_indicator_high = find_nearest_indicator_extreme(indicator_highs, current_price_high['index'])
+            if (
+                prev_indicator_high and
+                current_indicator_high and
+                current_indicator_high['index'] > prev_indicator_high['index'] and
+                current_indicator_high['value'] < prev_indicator_high['value']
+            ):
+                top_divergence.append({
+                    'index': current_price_high['index'],
+                    'priceValue': current_price_high['value'],
+                    'indicatorValue': current_indicator_high['value'],
+                })
+                continue
+
+            matched = [
+                h for h in indicator_highs
+                if prev_price_high['index'] - indicator_align_tolerance <= h['index'] <= current_price_high['index'] + indicator_align_tolerance
+            ]
             if len(matched) < 2:
                 continue
             last_two = matched[-2:]
@@ -586,7 +620,7 @@ class AlertChecker:
                 top_divergence.append({
                     'index': current_price_high['index'],
                     'priceValue': current_price_high['value'],
-                    'indicatorValue': indicator_values[current_price_high['index']],
+                    'indicatorValue': last_two[1]['value'],
                 })
 
         for i in range(1, len(price_lows)):
@@ -594,7 +628,25 @@ class AlertChecker:
             prev_price_low = price_lows[i - 1]
             if current_price_low['value'] >= prev_price_low['value']:
                 continue
-            matched = [l for l in indicator_lows if prev_price_low['index'] <= l['index'] <= current_price_low['index']]
+            prev_indicator_low = find_nearest_indicator_extreme(indicator_lows, prev_price_low['index'])
+            current_indicator_low = find_nearest_indicator_extreme(indicator_lows, current_price_low['index'])
+            if (
+                prev_indicator_low and
+                current_indicator_low and
+                current_indicator_low['index'] > prev_indicator_low['index'] and
+                current_indicator_low['value'] > prev_indicator_low['value']
+            ):
+                bottom_divergence.append({
+                    'index': current_price_low['index'],
+                    'priceValue': current_price_low['value'],
+                    'indicatorValue': current_indicator_low['value'],
+                })
+                continue
+
+            matched = [
+                l for l in indicator_lows
+                if prev_price_low['index'] - indicator_align_tolerance <= l['index'] <= current_price_low['index'] + indicator_align_tolerance
+            ]
             if len(matched) < 2:
                 continue
             last_two = matched[-2:]
@@ -602,7 +654,7 @@ class AlertChecker:
                 bottom_divergence.append({
                     'index': current_price_low['index'],
                     'priceValue': current_price_low['value'],
-                    'indicatorValue': indicator_values[current_price_low['index']],
+                    'indicatorValue': last_two[1]['value'],
                 })
 
         return {'top': top_divergence, 'bottom': bottom_divergence}

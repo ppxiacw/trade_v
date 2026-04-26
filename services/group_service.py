@@ -3,9 +3,9 @@
 提供分组的创建、查询、更新、删除等功能
 """
 from datetime import datetime
+import os
 import time
-from threading import Lock
-from copy import deepcopy
+from threading import Lock, Thread
 from config.dbconfig import db_pool
 
 
@@ -24,25 +24,43 @@ def _serialize_group_datetimes(group):
             group[key] = value.strftime('%Y-%m-%d %H:%M:%S')
 
 
-# /api/groups 查询缓存（短 TTL，降低高频查询压力）
+def _get_float_env(name, default, min_value=None):
+    """读取浮点型环境变量，非法值时回退默认值，并可设置下限。"""
+    raw = os.getenv(name)
+    if raw is None:
+        value = float(default)
+    else:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = float(default)
+    if min_value is not None:
+        value = max(float(min_value), value)
+    return value
+
+
+# /api/groups 查询缓存（可配置 TTL，降低高 RTT 回源压力）
 _GROUP_CACHE_LOCK = Lock()
 _GROUP_CACHE = {
     True: {'expire_at': 0.0, 'data': None},   # include_stocks=True
     False: {'expire_at': 0.0, 'data': None},  # include_stocks=False
 }
 _GROUP_CACHE_TTL_SECONDS = {
-    True: 60.0,
-    False: 120.0,
+    # 可通过环境变量覆盖，默认值拉长以降低高 RTT 场景下的回源抖动
+    True: _get_float_env('GROUP_CACHE_TTL_WITH_STOCKS_SECONDS', 1800.0, min_value=120.0),
+    False: _get_float_env('GROUP_CACHE_TTL_BASE_SECONDS', 3600.0, min_value=300.0),
 }
-# /api/groups/<id> 与 /api/groups/code/<code> 查询缓存（短 TTL）
+# /api/groups/<id> 与 /api/groups/code/<code> 查询缓存（可配置 TTL）
 _GROUP_DETAIL_CACHE_LOCK = Lock()
 _GROUP_DETAIL_CACHE = {}
 _GROUP_DETAIL_CACHE_TTL_SECONDS = {
-    True: 30.0,
-    False: 120.0,
+    True: _get_float_env('GROUP_DETAIL_CACHE_TTL_WITH_STOCKS_SECONDS', 1800.0, min_value=120.0),
+    False: _get_float_env('GROUP_DETAIL_CACHE_TTL_BASE_SECONDS', 3600.0, min_value=300.0),
 }
 _GROUP_INDEX_INIT_LOCK = Lock()
 _GROUP_INDEX_INIT_DONE = False
+_GROUP_CACHE_WARMUP_LOCK = Lock()
+_GROUP_CACHE_WARMUP_STARTED = False
 
 
 def _get_cached_groups(include_stocks):
@@ -53,7 +71,7 @@ def _get_cached_groups(include_stocks):
             return None
         if entry['data'] is None or entry['expire_at'] <= now:
             return None
-        return deepcopy(entry['data'])
+        return entry['data']
 
 
 def _set_cached_groups(include_stocks, groups):
@@ -61,7 +79,7 @@ def _set_cached_groups(include_stocks, groups):
     with _GROUP_CACHE_LOCK:
         _GROUP_CACHE[include_stocks] = {
             'expire_at': time.time() + ttl,
-            'data': deepcopy(groups),
+            'data': groups,
         }
 
 
@@ -74,7 +92,7 @@ def _get_cached_group_detail(cache_key):
         if entry['data'] is None or entry['expire_at'] <= now:
             _GROUP_DETAIL_CACHE.pop(cache_key, None)
             return None
-        return deepcopy(entry['data'])
+        return entry['data']
 
 
 def _set_cached_group_detail(cache_key, include_stocks, group_detail):
@@ -82,7 +100,7 @@ def _set_cached_group_detail(cache_key, include_stocks, group_detail):
     with _GROUP_DETAIL_CACHE_LOCK:
         _GROUP_DETAIL_CACHE[cache_key] = {
             'expire_at': time.time() + ttl,
-            'data': deepcopy(group_detail),
+            'data': group_detail,
         }
 
 
@@ -94,11 +112,57 @@ def _invalidate_group_cache():
         _GROUP_DETAIL_CACHE.clear()
 
 
+def _parse_prewarm_group_ids(raw_value):
+    group_ids = []
+    if not raw_value:
+        return group_ids
+    for part in str(raw_value).split(','):
+        text = part.strip()
+        if not text:
+            continue
+        try:
+            gid = int(text)
+            if gid > 0:
+                group_ids.append(gid)
+        except (TypeError, ValueError):
+            continue
+    return group_ids
+
+
+def _warmup_group_cache_once_async():
+    """
+    启动后台预热，尽量把高 RTT 场景下的首次慢查询前置到服务启动阶段。
+    可通过 GROUP_PREWARM_DETAIL_IDS（逗号分隔）指定详情预热分组，默认预热 ID=1。
+    """
+    global _GROUP_CACHE_WARMUP_STARTED
+    with _GROUP_CACHE_WARMUP_LOCK:
+        if _GROUP_CACHE_WARMUP_STARTED:
+            return
+        _GROUP_CACHE_WARMUP_STARTED = True
+
+    def _runner():
+        try:
+            groups = get_all_groups(include_stocks=False)
+            preload_ids = _parse_prewarm_group_ids(os.getenv('GROUP_PREWARM_DETAIL_IDS', '1'))
+            if not preload_ids and groups:
+                first_id = groups[0].get('id')
+                if isinstance(first_id, int) and first_id > 0:
+                    preload_ids = [first_id]
+            for gid in preload_ids:
+                get_group(gid, include_stocks=True)
+        except Exception as e:
+            # 预热失败不影响业务请求
+            print(f"分组缓存预热失败（可忽略）: {e}")
+
+    Thread(target=_runner, name='group-cache-warmup', daemon=True).start()
+
+
 def _ensure_group_indexes_once():
     """
     为 /api/groups 的核心查询补齐复合索引（仅进程内首次执行一次）：
     - stock_groups(is_active, sort_order, id)
     - stock_group_items(group_id, sort_order, id)
+    - stock_group_items(group_id, stock_code)
     """
     global _GROUP_INDEX_INIT_DONE
     if _GROUP_INDEX_INIT_DONE:
@@ -136,6 +200,18 @@ def _ensure_group_indexes_once():
                     """
                     CREATE INDEX idx_items_group_sort_id
                     ON stock_group_items (group_id, sort_order, id)
+                    """
+                )
+
+            cursor.execute(
+                "SHOW INDEX FROM stock_group_items WHERE Key_name = %s",
+                ('idx_items_group_code',),
+            )
+            if not cursor.fetchall():
+                cursor.execute(
+                    """
+                    CREATE INDEX idx_items_group_code
+                    ON stock_group_items (group_id, stock_code)
                     """
                 )
 
@@ -438,11 +514,19 @@ def create_group(group_data):
         
         # 如果有股票列表，添加股票
         stocks = group_data.get('stocks', [])
+        stock_rows = []
         for idx, stock in enumerate(stocks):
-            cursor.execute(
+            if not isinstance(stock, dict):
+                continue
+            code = (stock.get('stockCode') or stock.get('stock_code') or '').strip()
+            if not code:
+                continue
+            stock_rows.append((group_id, code, stock.get('stockName') or stock.get('stock_name') or '', idx + 1))
+        if stock_rows:
+            cursor.executemany(
                 """INSERT INTO stock_group_items (group_id, stock_code, stock_name, sort_order)
                    VALUES (%s, %s, %s, %s)""",
-                (group_id, stock.get('stockCode'), stock.get('stockName', ''), idx + 1)
+                stock_rows
             )
         
         conn.commit()
@@ -689,20 +773,7 @@ def add_stocks_batch_to_group(group_id, stocks):
         if not cursor.fetchone():
             return {'success': False, 'message': '分组不存在'}
 
-        cursor.execute(
-            "SELECT stock_code FROM stock_group_items WHERE group_id = %s",
-            (group_id,),
-        )
-        existing = {row['stock_code'] for row in cursor.fetchall()}
-
-        cursor.execute(
-            "SELECT COALESCE(MAX(sort_order), 0) AS m FROM stock_group_items WHERE group_id = %s",
-            (group_id,),
-        )
-        row_m = cursor.fetchone()
-        max_order = int(row_m['m'] or 0)
-
-        added = 0
+        normalized_items = []
         skipped = 0
         for item in stocks:
             if not isinstance(item, dict):
@@ -712,18 +783,48 @@ def add_stocks_batch_to_group(group_id, stocks):
             if not code:
                 skipped += 1
                 continue
+            name = item.get('stockName') or item.get('stock_name') or ''
+            normalized_items.append((code, name))
+
+        incoming_codes = list(dict.fromkeys(code for code, _ in normalized_items))
+        existing = set()
+        if incoming_codes:
+            chunk_size = 500
+            for start in range(0, len(incoming_codes), chunk_size):
+                chunk = incoming_codes[start:start + chunk_size]
+                placeholders = ','.join(['%s'] * len(chunk))
+                cursor.execute(
+                    f"""
+                    SELECT stock_code
+                    FROM stock_group_items
+                    WHERE group_id = %s AND stock_code IN ({placeholders})
+                    """,
+                    tuple([group_id] + chunk),
+                )
+                existing.update(row['stock_code'] for row in cursor.fetchall())
+
+        cursor.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) AS m FROM stock_group_items WHERE group_id = %s",
+            (group_id,),
+        )
+        row_m = cursor.fetchone()
+        max_order = int(row_m['m'] or 0)
+
+        rows_to_insert = []
+        for code, name in normalized_items:
             if code in existing:
                 skipped += 1
                 continue
-            name = item.get('stockName') or item.get('stock_name') or ''
             max_order += 1
-            cursor.execute(
+            rows_to_insert.append((group_id, code, name, max_order))
+            existing.add(code)
+        if rows_to_insert:
+            cursor.executemany(
                 """INSERT INTO stock_group_items (group_id, stock_code, stock_name, sort_order)
                    VALUES (%s, %s, %s, %s)""",
-                (group_id, code, name, max_order),
+                rows_to_insert,
             )
-            existing.add(code)
-            added += 1
+        added = len(rows_to_insert)
 
         conn.commit()
         if added > 0:
@@ -819,11 +920,19 @@ def update_group_stocks(group_id, stocks):
         cursor.execute("DELETE FROM stock_group_items WHERE group_id = %s", (group_id,))
         
         # 添加新股票
+        stock_rows = []
         for idx, stock in enumerate(stocks):
-            cursor.execute(
+            if not isinstance(stock, dict):
+                continue
+            code = (stock.get('stockCode') or stock.get('stock_code') or '').strip()
+            if not code:
+                continue
+            stock_rows.append((group_id, code, stock.get('stockName') or stock.get('stock_name') or '', idx + 1))
+        if stock_rows:
+            cursor.executemany(
                 """INSERT INTO stock_group_items (group_id, stock_code, stock_name, sort_order)
                    VALUES (%s, %s, %s, %s)""",
-                (group_id, stock.get('stockCode'), stock.get('stockName', ''), idx + 1)
+                stock_rows
             )
         
         conn.commit()
@@ -831,7 +940,7 @@ def update_group_stocks(group_id, stocks):
         
         return {
             'success': True,
-            'message': f'分组股票更新成功，共 {len(stocks)} 只股票'
+            'message': f'分组股票更新成功，共 {len(stock_rows)} 只股票'
         }
         
     except Exception as e:
@@ -845,4 +954,8 @@ def update_group_stocks(group_id, stocks):
             cursor.close()
         if conn:
             conn.close()
+
+
+# 模块加载后启动一次后台缓存预热，降低首个分组请求延迟
+_warmup_group_cache_once_async()
 
