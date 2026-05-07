@@ -385,6 +385,22 @@ def _decode_csv_content(raw_bytes):
     raise ValueError('无法识别CSV文件编码，请导出为UTF-8或GBK后重试')
 
 
+def _create_delivery_dict_reader(csv_text):
+    """
+    自动识别分隔符（逗号/制表符等），兼容券商导出的 .csv/.xls(制表文本)。
+    """
+    sample_lines = csv_text.splitlines()
+    sample_text = '\n'.join(sample_lines[:20]) if sample_lines else csv_text[:2048]
+    delimiter = ','
+    try:
+        dialect = csv.Sniffer().sniff(sample_text, delimiters=',\t;|')
+        delimiter = getattr(dialect, 'delimiter', ',') or ','
+    except Exception:
+        if '\t' in sample_text and sample_text.count('\t') >= sample_text.count(','):
+            delimiter = '\t'
+    return csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+
+
 def _build_delivery_unique_hash(row):
     unique_key = '|'.join([
         str(row.get('成交日期') or '').strip(),
@@ -470,7 +486,7 @@ def import_delivery_csv(file_storage):
             return {'success': False, 'message': '文件过大，请控制在8MB以内'}
 
         csv_text = _decode_csv_content(raw_bytes)
-        reader = csv.DictReader(io.StringIO(csv_text))
+        reader = _create_delivery_dict_reader(csv_text)
         if not reader.fieldnames:
             return {'success': False, 'message': 'CSV缺少表头'}
 

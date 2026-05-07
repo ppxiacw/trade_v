@@ -154,7 +154,7 @@ class AlertChecker:
                 match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
                 if match:
                     try:
-                        return float(match.group(1)) >= 70
+                        return float(match.group(1)) >= 80
                     except (TypeError, ValueError):
                         return False
         return False
@@ -327,10 +327,8 @@ class AlertChecker:
 
             close_values = [item['close'] for item in kline_rows]
             macd_dif = self._calculate_macd_dif_series(close_values)
-            rsi_series = self._calculate_rsi_series(close_values, period=14)
 
             macd_divergence = self._detect_divergence(kline_rows, macd_dif, lookback)
-            rsi_divergence = self._detect_divergence(kline_rows, rsi_series, lookback)
 
             candidates = []
             if stock_divergence_cfg.get('macd_enabled'):
@@ -338,11 +336,6 @@ class AlertChecker:
                     candidates.append(('MACD', 'top', macd_divergence['top'][-1] if macd_divergence['top'] else None))
                 if stock_divergence_cfg.get('bottom_enabled'):
                     candidates.append(('MACD', 'bottom', macd_divergence['bottom'][-1] if macd_divergence['bottom'] else None))
-            if stock_divergence_cfg.get('rsi_enabled'):
-                if stock_divergence_cfg.get('top_enabled'):
-                    candidates.append(('RSI', 'top', rsi_divergence['top'][-1] if rsi_divergence['top'] else None))
-                if stock_divergence_cfg.get('bottom_enabled'):
-                    candidates.append(('RSI', 'bottom', rsi_divergence['bottom'][-1] if rsi_divergence['bottom'] else None))
             if not candidates:
                 continue
 
@@ -945,7 +938,7 @@ class AlertChecker:
         alerts.extend(rsi_alerts)
 
         # K线形态分析
-        pattern_alerts = self._analyze_candle_patterns(stock, window, last_k, prev_k, prev_prev_k)
+        pattern_alerts = self._analyze_candle_patterns(stock, window, last_k, prev_k, prev_prev_k, results_min)
         alerts.extend(pattern_alerts)
 
         return alerts
@@ -969,7 +962,7 @@ class AlertChecker:
 
     def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6):
         """检查RSI边界条件"""
-        # 取消 1 分钟 RSI 越界（<20 或 >70）告警，避免高频噪声。
+        # 取消 1 分钟 RSI 越界（<20 或 >80）告警，避免高频噪声。
         if window == 1:
             state_key = f"{stock}_{window}"
             if state_key in self._rsi_trigger_states:
@@ -982,8 +975,8 @@ class AlertChecker:
 
         current_state = self._rsi_trigger_states[state_key]
 
-        if not 20 <= rsi_6 <= 70:
-            is_consecutive_trigger = (pre_rsi_6 is not None and not 20 <= pre_rsi_6 <= 70)
+        if not 20 <= rsi_6 <= 80:
+            is_consecutive_trigger = (pre_rsi_6 is not None and not 20 <= pre_rsi_6 <= 80)
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 current_state['last_rsi_triggered'] = True
@@ -1000,7 +993,7 @@ class AlertChecker:
 
     def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_6, last_k, prev_k):
         """检查RSI极端值的K线模式"""
-        # 1 分钟级别不再监控 RSI 20/70 相关模式（rsi_6_up / rsi_6_down）。
+        # 1 分钟级别不再监控 RSI 20/80 相关模式（rsi_6_up / rsi_6_down）。
         if window == 1:
             return []
 
@@ -1013,19 +1006,24 @@ class AlertChecker:
             ))
 
         # RSI高位回落模式
-        if pre_rsi_6 >= 70 and self._is_bearish_reversal(last_k, prev_k):
+        if pre_rsi_6 >= 80 and self._is_bearish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock, f"({window}min)rsi_6_down", window, '卖点'
             ))
 
         return alerts
 
-    def _analyze_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k):
+    def _analyze_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k, results_min):
         """分析K线形态模式"""
         alerts = []
+        rsi_6 = None
+        try:
+            rsi_6 = float(IndicatorCalculation.calculate_rsi(results_min[:-1], 6))
+        except Exception:
+            rsi_6 = None
 
         # 吞没形态
-        engulfing_alert = self._check_engulfing_pattern(stock, window, last_k, prev_k)
+        engulfing_alert = self._check_engulfing_pattern(stock, window, last_k, prev_k, rsi_6)
         if engulfing_alert:
             alerts.append(engulfing_alert)
 
@@ -1035,20 +1033,26 @@ class AlertChecker:
 
         return alerts
 
-    def _check_engulfing_pattern(self, stock, window, last_k, prev_k):
+    def _check_engulfing_pattern(self, stock, window, last_k, prev_k, rsi_6=None):
         if window == 1:
             return None
         """检查吞没形态"""
+        # 仅在 RSI 进入极值区间时触发吞没告警，避免噪声信号。
+        if rsi_6 is None:
+            return None
+
         # 阳包阴
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and
-                last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount']):
+                last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount'] and
+                rsi_6 < 20):
             return self._create_alert_data(
                 stock, f"({window}min)engulfing_up", window, '买点'
             )
 
         # 阴包阳
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and
-              last_k['close'] < last_k['open'] and last_k['amount'] > prev_k['amount']):
+              last_k['close'] < last_k['open'] and last_k['amount'] > prev_k['amount'] and
+              rsi_6 > 80):
             return self._create_alert_data(
                 stock, f"({window}min)engulfing_down", window, '卖点'
             )

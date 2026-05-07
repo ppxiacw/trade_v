@@ -134,7 +134,7 @@ def _parse_periods_from_storage(raw_value):
 def _apply_divergence_defaults_to_stock(stock):
     stock['divergence_enabled'] = 1 if _to_bool(stock.get('divergence_enabled'), False) else 0
     stock['divergence_macd_enabled'] = 1 if _to_bool(stock.get('divergence_macd_enabled'), True) else 0
-    stock['divergence_rsi_enabled'] = 1 if _to_bool(stock.get('divergence_rsi_enabled'), True) else 0
+    stock['divergence_rsi_enabled'] = 0
     stock['divergence_top_enabled'] = 1 if _to_bool(stock.get('divergence_top_enabled'), True) else 0
     stock['divergence_bottom_enabled'] = 1 if _to_bool(stock.get('divergence_bottom_enabled'), True) else 0
     stock['divergence_periods'] = _parse_periods_from_storage(stock.get('divergence_periods'))
@@ -167,7 +167,7 @@ def _build_divergence_patch_from_payload(data):
         patch['normal_movement'] = 0
         patch['divergence_enabled'] = enabled
         patch['divergence_macd_enabled'] = 1
-        patch['divergence_rsi_enabled'] = 1
+        patch['divergence_rsi_enabled'] = 0
         patch['divergence_top_enabled'] = 1
         patch['divergence_bottom_enabled'] = 1
     if 'point_monitor_enabled' in data:
@@ -178,7 +178,7 @@ def _build_divergence_patch_from_payload(data):
         patch['normal_movement'] = 0
         patch['divergence_enabled'] = enabled
         patch['divergence_macd_enabled'] = 1
-        patch['divergence_rsi_enabled'] = 1
+        patch['divergence_rsi_enabled'] = 0
         patch['divergence_top_enabled'] = 1
         patch['divergence_bottom_enabled'] = 1
     if 'divergence_enabled' in data:
@@ -186,7 +186,7 @@ def _build_divergence_patch_from_payload(data):
     if 'divergence_macd_enabled' in data:
         patch['divergence_macd_enabled'] = 1 if _to_bool(data.get('divergence_macd_enabled'), True) else 0
     if 'divergence_rsi_enabled' in data:
-        patch['divergence_rsi_enabled'] = 1 if _to_bool(data.get('divergence_rsi_enabled'), True) else 0
+        patch['divergence_rsi_enabled'] = 0
     if 'divergence_top_enabled' in data:
         patch['divergence_top_enabled'] = 1 if _to_bool(data.get('divergence_top_enabled'), True) else 0
     if 'divergence_bottom_enabled' in data:
@@ -260,7 +260,7 @@ def _normalize_alert_type_for_client(alert_type, alert_message):
                 rsi_value = float(rsi_match.group(1))
                 if rsi_value <= 20:
                     return '买点'
-                if rsi_value >= 70:
+                if rsi_value >= 80:
                     return '卖点'
             except (TypeError, ValueError):
                 pass
@@ -546,7 +546,7 @@ def _ensure_monitor_stock_columns_once():
                     'divergence_kline_count': "ALTER TABLE stocks ADD COLUMN divergence_kline_count INT NULL COMMENT '背离计算K线样本数'",
                     'divergence_lookback': "ALTER TABLE stocks ADD COLUMN divergence_lookback INT NULL COMMENT '背离局部极值窗口'",
                     'divergence_macd_enabled': "ALTER TABLE stocks ADD COLUMN divergence_macd_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用MACD背离'",
-                    'divergence_rsi_enabled': "ALTER TABLE stocks ADD COLUMN divergence_rsi_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用RSI背离'",
+                    'divergence_rsi_enabled': "ALTER TABLE stocks ADD COLUMN divergence_rsi_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用RSI背离'",
                     'divergence_top_enabled': "ALTER TABLE stocks ADD COLUMN divergence_top_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用顶背离'",
                     'divergence_bottom_enabled': "ALTER TABLE stocks ADD COLUMN divergence_bottom_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用底背离'",
                 }
@@ -913,8 +913,8 @@ def post_divergence_alert():
             return jsonify({'success': False, 'message': '缺少有效股票代码'}), 400
 
         indicator = str(payload.get('indicator') or '').strip().upper()
-        if indicator not in {'MACD', 'RSI'}:
-            return jsonify({'success': False, 'message': 'indicator 仅支持 MACD/RSI'}), 400
+        if indicator != 'MACD':
+            return jsonify({'success': False, 'message': 'indicator 仅支持 MACD'}), 400
 
         divergence_type = str(payload.get('divergence_type') or '').strip().lower()
         if divergence_type not in {'top', 'bottom'}:
@@ -1062,7 +1062,7 @@ def get_alert_history():
                     '卖点',
                     '观察',
                     '%rsi_6_down%',
-                    'rsi_6:[[:space:]]*([7-9][0-9](\\.[0-9]+)?)',
+                    'rsi_6:[[:space:]]*([8-9][0-9](\\.[0-9]+)?)',
                 ])
             elif alert_type in {'顶背离', '底背离'}:
                 message_keyword = '%顶背离%' if alert_type == '顶背离' else '%底背离%'
@@ -1240,7 +1240,7 @@ def get_alert_stats():
                     WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_up%' THEN '买点'
                     WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_down%' THEN '卖点'
                     WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
-                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([7-9][0-9](\\.[0-9]+)?)' THEN '卖点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([8-9][0-9](\\.[0-9]+)?)' THEN '卖点'
                     WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
                     WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
                     ELSE alert_type
@@ -1253,7 +1253,7 @@ def get_alert_stats():
                     WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_up%' THEN '买点'
                     WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_down%' THEN '卖点'
                     WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
-                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([7-9][0-9](\\.[0-9]+)?)' THEN '卖点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([8-9][0-9](\\.[0-9]+)?)' THEN '卖点'
                     WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
                     WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
                     ELSE alert_type
