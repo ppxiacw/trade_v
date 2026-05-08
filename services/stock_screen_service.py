@@ -1610,11 +1610,112 @@ def _estimate_historical_mv_yi(current_mv_yi: Optional[float], current_price: Op
     return float(current_mv_yi) * float(historical_close) / float(current_price)
 
 
+def _normalize_db_trade_date(raw_value: Any) -> Optional[date]:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, datetime):
+        return raw_value.date()
+    if isinstance(raw_value, date):
+        return raw_value
+    text = str(raw_value).strip()
+    if not text:
+        return None
+    return datetime.strptime(text[:10], "%Y-%m-%d").date()
+
+
+def _resolve_latest_trade_date() -> Optional[date]:
+    rows = exeQuery("SELECT MAX(trade_date) AS trade_date FROM stock_daily_kline") or []
+    raw = (rows[0] or {}).get("trade_date") if rows else None
+    return _normalize_db_trade_date(raw)
+
+
+def _load_trade_dates_before_or_on(end_trade_date: date, limit: int) -> List[date]:
+    rows = exeQuery(
+        """
+        SELECT DISTINCT trade_date
+        FROM stock_daily_kline
+        WHERE trade_date <= %s
+        ORDER BY trade_date DESC
+        LIMIT %s
+        """,
+        (end_trade_date, int(limit)),
+    ) or []
+    out: List[date] = []
+    for row in rows:
+        normalized = _normalize_db_trade_date((row or {}).get("trade_date"))
+        if normalized is not None:
+            out.append(normalized)
+    return out
+
+
+def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict[date, dict]]:
+    if not trade_dates:
+        return {}
+    placeholders = ", ".join(["%s"] * len(trade_dates))
+    rows = exeQuery(
+        f"""
+        SELECT ts_code, trade_date, close, pre_close, pct_chg, vol
+        FROM stock_daily_kline
+        WHERE trade_date IN ({placeholders})
+        """,
+        tuple(trade_dates),
+    ) or []
+    series_map: Dict[str, Dict[date, dict]] = {}
+    for row in rows:
+        ts_code = str((row or {}).get("ts_code") or "").strip().upper()
+        trade_day = _normalize_db_trade_date((row or {}).get("trade_date"))
+        if not ts_code or trade_day is None:
+            continue
+        day_series = series_map.setdefault(ts_code, {})
+        close = _safe_float((row or {}).get("close"))
+        pre_close = _safe_float((row or {}).get("pre_close"))
+        pct_chg = _safe_float((row or {}).get("pct_chg"))
+        if pct_chg is None and close is not None and pre_close is not None and pre_close != 0:
+            pct_chg = ((close - pre_close) / pre_close) * 100
+        day_series[trade_day] = {
+            "close": close,
+            "pre_close": pre_close,
+            "pct_chg": pct_chg,
+            "vol": _safe_float((row or {}).get("vol")),
+        }
+    return series_map
+
+
+def _is_consecutive_shrink_pullback(
+    series_by_date: Dict[date, dict],
+    reference_trade_date: date,
+    follow_trade_dates: List[date],
+) -> bool:
+    reference_day = series_by_date.get(reference_trade_date)
+    if not reference_day:
+        return False
+    prev_volume = _safe_float(reference_day.get("vol"))
+    if prev_volume is None or prev_volume <= 0:
+        return False
+
+    for trade_day in follow_trade_dates:
+        daily = series_by_date.get(trade_day)
+        if not daily:
+            return False
+        pct_chg = _safe_float(daily.get("pct_chg"))
+        if pct_chg is None or pct_chg > 0:
+            return False
+        volume = _safe_float(daily.get("vol"))
+        if volume is None or volume <= 0:
+            return False
+        if volume >= prev_volume:
+            return False
+        prev_volume = volume
+    return True
+
+
 def screen_stocks_by_mv_and_pct(
     min_mv_yi: float,
     min_pct_chg: float,
     limit: int = 3000,
     trade_date: Optional[str] = None,
+    lookback_days: int = 0,
+    pullback_days: int = 0,
 ) -> Tuple[List[dict], dict]:
     requested_trade_date = _parse_trade_date_input(trade_date)
     effective_trade_date = None
@@ -1687,6 +1788,41 @@ def screen_stocks_by_mv_and_pct(
     historical_mv_estimated_count = 0
     historical_daily_matched_count = 0
     historical_pct_recomputed_count = 0
+    pullback_filter_enabled = lookback_days > 0 and pullback_days > 0
+    pullback_base_trade_date: Optional[date] = None
+    pullback_anchor_trade_date: Optional[date] = None
+    pullback_reference_trade_date: Optional[date] = None
+    pullback_follow_trade_dates: List[date] = []
+    pullback_series_map: Dict[str, Dict[date, dict]] = {}
+
+    if pullback_filter_enabled:
+        pullback_base_trade_date = effective_trade_date or _resolve_latest_trade_date()
+        if pullback_base_trade_date is None:
+            raise RuntimeError(
+                "缩量回调筛选失败：stock_daily_kline 无可用交易日。"
+                "请先执行 /api/daily_kline/sync_full 或 /api/daily_kline/sync_incremental。"
+            )
+        window_days_desc = _load_trade_dates_before_or_on(
+            end_trade_date=pullback_base_trade_date,
+            limit=lookback_days + 1,
+        )
+        if len(window_days_desc) < lookback_days + 1:
+            raise RuntimeError(
+                f"缩量回调筛选失败：截至 {pullback_base_trade_date.isoformat()} 仅有 {len(window_days_desc)} 个可用交易日，"
+                f"不足 lookback_days={lookback_days}。"
+            )
+        window_days_asc = list(reversed(window_days_desc))
+        pullback_anchor_trade_date = window_days_asc[0]
+        pullback_follow_trade_dates = window_days_asc[-pullback_days:]
+        if len(pullback_follow_trade_dates) < pullback_days:
+            raise RuntimeError(
+                f"缩量回调筛选失败：基准日 {pullback_anchor_trade_date.isoformat()} 之后可用交易日不足 {pullback_days} 天。"
+            )
+        pullback_reference_trade_date = window_days_asc[-(pullback_days + 1)]
+        pullback_series_map = _load_daily_series_by_trade_dates(
+            [pullback_anchor_trade_date, pullback_reference_trade_date, *pullback_follow_trade_dates]
+        )
+
     matched_quote_symbols: set[str] = set()
     for q in quotes:
         gsym = q.get("gtimg_symbol")
@@ -1709,6 +1845,8 @@ def screen_stocks_by_mv_and_pct(
         turnover_rate = q.get("turnover_rate")
         volume = None
         amount = None
+        mv_filter_ref = mv_yi
+        pct_filter_ref = pct
 
         if effective_trade_date is not None:
             daily = daily_snapshot_map.get(ts_code.upper())
@@ -1732,9 +1870,33 @@ def screen_stocks_by_mv_and_pct(
                 historical_mv_estimated_count += 1
             mv_yi = estimated_mv
 
-        if mv_yi is None or pct is None:
+        if pullback_filter_enabled:
+            if (
+                pullback_anchor_trade_date is None
+                or pullback_reference_trade_date is None
+                or not pullback_follow_trade_dates
+            ):
+                continue
+            ts_series = pullback_series_map.get(ts_code.upper()) or {}
+            anchor_series = ts_series.get(pullback_anchor_trade_date)
+            if not anchor_series:
+                continue
+            if not _is_consecutive_shrink_pullback(
+                series_by_date=ts_series,
+                reference_trade_date=pullback_reference_trade_date,
+                follow_trade_dates=pullback_follow_trade_dates,
+            ):
+                continue
+            pct_filter_ref = _safe_float(anchor_series.get("pct_chg"))
+            mv_filter_ref = _estimate_historical_mv_yi(
+                current_mv_yi=q.get("total_mv_yi"),
+                current_price=q.get("price"),
+                historical_close=anchor_series.get("close"),
+            )
+
+        if mv_filter_ref is None or pct_filter_ref is None:
             continue
-        if mv_yi < float(min_mv_yi) or pct < float(min_pct_chg):
+        if mv_filter_ref < float(min_mv_yi) or pct_filter_ref < float(min_pct_chg):
             continue
 
         nm = (q.get("name_raw") or "").strip() or name_hint
@@ -1816,6 +1978,21 @@ def screen_stocks_by_mv_and_pct(
         "exclude_star_board": True,
         "exclude_note": "已排除科创板（代码 688 开头）",
     }
+    if pullback_filter_enabled:
+        meta.update(
+            {
+                "pullback_filter_enabled": True,
+                "pullback_base_trade_date": pullback_base_trade_date.isoformat() if pullback_base_trade_date else "",
+                "pullback_anchor_trade_date": pullback_anchor_trade_date.isoformat() if pullback_anchor_trade_date else "",
+                "pullback_reference_trade_date": pullback_reference_trade_date.isoformat() if pullback_reference_trade_date else "",
+                "pullback_follow_trade_dates": [item.isoformat() for item in pullback_follow_trade_dates],
+                "lookback_days": int(lookback_days),
+                "pullback_days": int(pullback_days),
+                "pullback_note": "筛选条件基于基准日涨幅/市值 + 基准日之后最近N日连续缩量且日涨跌幅<=0。",
+            }
+        )
+    else:
+        meta["pullback_filter_enabled"] = False
     if effective_trade_date is None:
         meta["mode"] = "realtime"
     else:
