@@ -1715,7 +1715,6 @@ def screen_stocks_by_mv_and_pct(
     limit: int = 3000,
     trade_date: Optional[str] = None,
     lookback_days: int = 0,
-    pullback_days: int = 0,
 ) -> Tuple[List[dict], dict]:
     requested_trade_date = _parse_trade_date_input(trade_date)
     effective_trade_date = None
@@ -1788,7 +1787,8 @@ def screen_stocks_by_mv_and_pct(
     historical_mv_estimated_count = 0
     historical_daily_matched_count = 0
     historical_pct_recomputed_count = 0
-    pullback_filter_enabled = lookback_days > 0 and pullback_days > 0
+    effective_pullback_days = int(lookback_days) if lookback_days > 0 else 0
+    pullback_filter_enabled = effective_pullback_days > 0
     pullback_base_trade_date: Optional[date] = None
     pullback_anchor_trade_date: Optional[date] = None
     pullback_reference_trade_date: Optional[date] = None
@@ -1813,14 +1813,14 @@ def screen_stocks_by_mv_and_pct(
             )
         window_days_asc = list(reversed(window_days_desc))
         pullback_anchor_trade_date = window_days_asc[0]
-        pullback_follow_trade_dates = window_days_asc[-pullback_days:]
-        if len(pullback_follow_trade_dates) < pullback_days:
+        pullback_follow_trade_dates = window_days_asc[1:]
+        if len(pullback_follow_trade_dates) < effective_pullback_days:
             raise RuntimeError(
-                f"缩量回调筛选失败：基准日 {pullback_anchor_trade_date.isoformat()} 之后可用交易日不足 {pullback_days} 天。"
+                f"缩量回调筛选失败：基准日 {pullback_anchor_trade_date.isoformat()} 之后可用交易日不足 {effective_pullback_days} 天。"
             )
-        pullback_reference_trade_date = window_days_asc[-(pullback_days + 1)]
+        pullback_reference_trade_date = pullback_anchor_trade_date
         pullback_series_map = _load_daily_series_by_trade_dates(
-            [pullback_anchor_trade_date, pullback_reference_trade_date, *pullback_follow_trade_dates]
+            [pullback_anchor_trade_date, *pullback_follow_trade_dates]
         )
 
     matched_quote_symbols: set[str] = set()
@@ -1987,8 +1987,8 @@ def screen_stocks_by_mv_and_pct(
                 "pullback_reference_trade_date": pullback_reference_trade_date.isoformat() if pullback_reference_trade_date else "",
                 "pullback_follow_trade_dates": [item.isoformat() for item in pullback_follow_trade_dates],
                 "lookback_days": int(lookback_days),
-                "pullback_days": int(pullback_days),
-                "pullback_note": "筛选条件基于基准日涨幅/市值 + 基准日之后最近N日连续缩量且日涨跌幅<=0。",
+                "pullback_days": int(effective_pullback_days),
+                "pullback_note": "筛选条件基于基准日涨幅/市值 + 基准日后连续N日缩量回调（N=lookback_days）。",
             }
         )
     else:

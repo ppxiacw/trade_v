@@ -88,7 +88,7 @@ def screen_mv_pct():
       limit: 最大返回条数，默认 3000，最大 8000
       trade_date: 可选，历史日期（YYYY-MM-DD / YYYYMMDD）
       lookback_days: 可选，基准日向前偏移 N 个交易日（默认 0=关闭）
-      pullback_days: 可选，基准日后连续缩量回调天数（默认 0=关闭）
+                     启用后回调天数固定等于 N
     """
     try:
         min_mv_yi = request.args.get('min_mv_yi', default=50.0, type=float)
@@ -96,7 +96,6 @@ def screen_mv_pct():
         limit = request.args.get('limit', default=3000, type=int)
         trade_date = (request.args.get('trade_date', default='', type=str) or '').strip()
         lookback_days = request.args.get('lookback_days', default=0, type=int)
-        pullback_days = request.args.get('pullback_days', default=0, type=int)
 
         if min_mv_yi < 0:
             return jsonify({'success': False, 'message': 'min_mv_yi 不能为负数'}), 400
@@ -104,12 +103,6 @@ def screen_mv_pct():
             return jsonify({'success': False, 'message': 'limit 需在 1～8000 之间'}), 400
         if lookback_days < 0 or lookback_days > 120:
             return jsonify({'success': False, 'message': 'lookback_days 需在 0～120 之间'}), 400
-        if pullback_days < 0 or pullback_days > 30:
-            return jsonify({'success': False, 'message': 'pullback_days 需在 0～30 之间'}), 400
-        if (lookback_days > 0 and pullback_days == 0) or (lookback_days == 0 and pullback_days > 0):
-            return jsonify({'success': False, 'message': 'lookback_days 与 pullback_days 需同时启用或同时关闭'}), 400
-        if pullback_days > lookback_days:
-            return jsonify({'success': False, 'message': 'pullback_days 不能大于 lookback_days'}), 400
 
         data, meta = screen_stocks_by_mv_and_pct(
             min_mv_yi=min_mv_yi,
@@ -117,7 +110,6 @@ def screen_mv_pct():
             limit=limit,
             trade_date=trade_date or None,
             lookback_days=lookback_days,
-            pullback_days=pullback_days,
         )
         return jsonify({
             'success': True,
@@ -130,7 +122,6 @@ def screen_mv_pct():
                 'limit': limit,
                 'trade_date': trade_date or None,
                 'lookback_days': lookback_days,
-                'pullback_days': pullback_days,
             },
         })
     except ValueError as e:
