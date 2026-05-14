@@ -140,6 +140,11 @@ def _prefix_to_ts_code(stock_code: str) -> Optional[str]:
     if not stock_code:
         return None
     code = str(stock_code).strip().lower()
+    suffix_match = re.fullmatch(r"(\d{1,6})\.(sh|sz|bj)", code, flags=re.I)
+    if suffix_match:
+        num = str(suffix_match.group(1) or "").zfill(6)
+        exchange = str(suffix_match.group(2) or "").upper()
+        return f"{num}.{exchange}"
     if len(code) >= 8 and code[:2] in ("sh", "sz", "bj") and code[2:].isdigit():
         num = code[2:].zfill(6)
         return f"{num}.{code[:2].upper()}"
@@ -1651,22 +1656,42 @@ def _load_trade_dates_before_or_on(end_trade_date: date, limit: int) -> List[dat
 def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict[date, dict]]:
     if not trade_dates:
         return {}
-    placeholders = ", ".join(["%s"] * len(trade_dates))
+    target_dates = sorted(list(dict.fromkeys(trade_dates)))
+    target_date_set = set(target_dates)
+
+    # 为最早目标交易日补一个“前一交易日”，用于统一重算涨跌幅口径。
+    query_dates = list(target_dates)
+    earliest_trade_date = target_dates[0]
+    prev_trade_rows = exeQuery(
+        """
+        SELECT DISTINCT trade_date
+        FROM stock_daily_kline
+        WHERE trade_date < %s
+        ORDER BY trade_date DESC
+        LIMIT 1
+        """,
+        (earliest_trade_date,),
+    ) or []
+    prev_trade_date = _normalize_db_trade_date((prev_trade_rows[0] or {}).get("trade_date")) if prev_trade_rows else None
+    if prev_trade_date is not None:
+        query_dates.append(prev_trade_date)
+
+    placeholders = ", ".join(["%s"] * len(query_dates))
     rows = exeQuery(
         f"""
         SELECT ts_code, trade_date, close, pre_close, pct_chg, vol
         FROM stock_daily_kline
         WHERE trade_date IN ({placeholders})
         """,
-        tuple(trade_dates),
+        tuple(query_dates),
     ) or []
-    series_map: Dict[str, Dict[date, dict]] = {}
+    raw_series_map: Dict[str, Dict[date, dict]] = {}
     for row in rows:
         ts_code = str((row or {}).get("ts_code") or "").strip().upper()
         trade_day = _normalize_db_trade_date((row or {}).get("trade_date"))
         if not ts_code or trade_day is None:
             continue
-        day_series = series_map.setdefault(ts_code, {})
+        day_series = raw_series_map.setdefault(ts_code, {})
         close = _safe_float((row or {}).get("close"))
         pre_close = _safe_float((row or {}).get("pre_close"))
         pct_chg = _safe_float((row or {}).get("pct_chg"))
@@ -1678,6 +1703,31 @@ def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict
             "pct_chg": pct_chg,
             "vol": _safe_float((row or {}).get("vol")),
         }
+
+    # 统一按“前一交易日收盘价”重算涨跌幅，避免 pre_close/pct_chg 脏数据导致回调筛选漏票。
+    series_map: Dict[str, Dict[date, dict]] = {}
+    for ts_code, by_day in raw_series_map.items():
+        sorted_days = sorted(by_day.keys())
+        prev_close_ref: Optional[float] = None
+        out_by_day: Dict[date, dict] = {}
+        for trade_day in sorted_days:
+            item = dict(by_day.get(trade_day) or {})
+            close = _safe_float(item.get("close"))
+            if close is None:
+                if trade_day in target_date_set:
+                    out_by_day[trade_day] = item
+                continue
+
+            if prev_close_ref is not None and prev_close_ref > 0:
+                item["pre_close"] = prev_close_ref
+                item["pct_chg"] = ((close - prev_close_ref) / prev_close_ref) * 100
+
+            prev_close_ref = close
+            if trade_day in target_date_set:
+                out_by_day[trade_day] = item
+
+        if out_by_day:
+            series_map[ts_code] = out_by_day
     return series_map
 
 

@@ -976,6 +976,10 @@ class AlertChecker:
         current_state = self._rsi_trigger_states[state_key]
 
         if not 20 <= rsi_6 <= 80:
+            # 取消 5 分钟周期 RSI 低位（<=20）告警，仅保留高位（>=80）告警。
+            if window == 5 and rsi_6 <= 20:
+                current_state['last_rsi_triggered'] = False
+                return None
             is_consecutive_trigger = (pre_rsi_6 is not None and not 20 <= pre_rsi_6 <= 80)
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
@@ -1000,7 +1004,7 @@ class AlertChecker:
         alerts = []
 
         # RSI低位反弹模式
-        if pre_rsi_6 <= 20 and self._is_bullish_reversal(last_k, prev_k):
+        if window != 5 and pre_rsi_6 <= 20 and self._is_bullish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock, f"({window}min)rsi_6_up", window, '买点'
             ))
@@ -1044,7 +1048,7 @@ class AlertChecker:
         # 阳包阴
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and
                 last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount'] and
-                rsi_6 < 20):
+                rsi_6 < 20 and window != 5):
             return self._create_alert_data(
                 stock, f"({window}min)engulfing_up", window, '买点'
             )

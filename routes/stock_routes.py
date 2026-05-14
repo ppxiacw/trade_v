@@ -83,7 +83,7 @@ def screen_mv_pct():
     """
     市值+涨幅筛选：支持实时模式与历史日期模式。
     查询参数：
-      min_mv_yi: 最小总市值（亿元），默认 50
+      min_mv_yi: 最小总市值（亿元），默认 0（无要求）
       min_pct_chg: 最小涨跌幅（%），默认 0
       limit: 最大返回条数，默认 3000，最大 8000
       trade_date: 可选，历史日期（YYYY-MM-DD / YYYYMMDD）
@@ -91,7 +91,7 @@ def screen_mv_pct():
                      启用后回调天数固定等于 N
     """
     try:
-        min_mv_yi = request.args.get('min_mv_yi', default=50.0, type=float)
+        min_mv_yi = request.args.get('min_mv_yi', default=0.0, type=float)
         min_pct_chg = request.args.get('min_pct_chg', default=0.0, type=float)
         limit = request.args.get('limit', default=3000, type=int)
         trade_date = (request.args.get('trade_date', default='', type=str) or '').strip()
