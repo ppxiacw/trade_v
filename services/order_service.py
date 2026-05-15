@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+from collections import deque
 from datetime import datetime
 from config.dbconfig import db_pool
 
@@ -420,6 +421,15 @@ def _chunked(items, size):
         yield items[idx: idx + size]
 
 
+def _infer_delivery_side(operation_text):
+    op = str(operation_text or '').strip()
+    if '卖' in op:
+        return 'sell'
+    if '买' in op:
+        return 'buy'
+    return 'unknown'
+
+
 def _ensure_delivery_records_table(cursor):
     cursor.execute(
         """
@@ -747,6 +757,255 @@ def get_delivery_records(stock_code=None, operation=None, limit=None, start_date
     except Exception as e:
         print(f"查询交割单记录失败: {e}")
         return []
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
+    """
+    按股票汇总交割单盈亏（已实现盈亏按 FIFO 口径估算）。
+    """
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        _ensure_delivery_records_table(cursor)
+
+        sql = """
+            SELECT
+                security_code,
+                security_name,
+                operation,
+                trade_quantity,
+                trade_price,
+                trade_amount,
+                commission,
+                stamp_duty,
+                other_fees,
+                trade_datetime,
+                id
+            FROM delivery_records
+            WHERE 1=1
+        """
+        params = []
+
+        normalized_code = _normalize_stock_code(stock_code) if stock_code else ''
+        if normalized_code:
+            sql += " AND security_code = %s"
+            params.append(normalized_code)
+        if start_date:
+            sql += " AND trade_datetime >= %s"
+            params.append(f"{str(start_date).strip()} 00:00:00")
+        if end_date:
+            sql += " AND trade_datetime <= %s"
+            params.append(f"{str(end_date).strip()} 23:59:59")
+
+        sql += " ORDER BY security_code ASC, trade_datetime ASC, id ASC"
+        cursor.execute(sql, tuple(params))
+        rows = cursor.fetchall() or []
+
+        per_stock = {}
+        for row in rows:
+            code = str(row.get('security_code') or '').strip()
+            if not code:
+                continue
+            stock_state = per_stock.setdefault(
+                code,
+                {
+                    'stock_code': code,
+                    'stock_name': str(row.get('security_name') or '').strip(),
+                    'buy_count': 0,
+                    'sell_count': 0,
+                    'buy_qty': 0,
+                    'sell_qty': 0,
+                    'buy_amount': 0.0,
+                    'sell_amount': 0.0,
+                    'buy_fees': 0.0,
+                    'sell_fees': 0.0,
+                    'total_fees': 0.0,
+                    'realized_pnl': 0.0,
+                    'oversold_qty': 0,
+                    'latest_buy_time': '',
+                    'latest_sell_time': '',
+                    'lots': deque(),  # FIFO: [{'qty': int, 'unit_cost': float}]
+                },
+            )
+
+            if not stock_state['stock_name'] and row.get('security_name'):
+                stock_state['stock_name'] = str(row.get('security_name') or '').strip()
+
+            qty = int(abs(float(row.get('trade_quantity') or 0)))
+            if qty <= 0:
+                continue
+            amount = float(abs(float(row.get('trade_amount') or 0.0)))
+            fees = (
+                float(row.get('commission') or 0.0)
+                + float(row.get('stamp_duty') or 0.0)
+                + float(row.get('other_fees') or 0.0)
+            )
+            side = _infer_delivery_side(row.get('operation'))
+            trade_time = row.get('trade_datetime')
+            if isinstance(trade_time, datetime):
+                trade_time_text = trade_time.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                trade_time_text = str(trade_time or '').strip()
+
+            if side == 'buy':
+                stock_state['buy_count'] += 1
+                stock_state['buy_qty'] += qty
+                stock_state['buy_amount'] += amount
+                stock_state['buy_fees'] += fees
+                stock_state['total_fees'] += fees
+                stock_state['latest_buy_time'] = trade_time_text
+
+                # 成本 = 买入金额 + 买入费用
+                unit_cost = (amount + fees) / qty if qty > 0 else 0.0
+                stock_state['lots'].append({'qty': qty, 'unit_cost': unit_cost})
+                continue
+
+            if side != 'sell':
+                continue
+
+            stock_state['sell_count'] += 1
+            stock_state['sell_qty'] += qty
+            stock_state['sell_amount'] += amount
+            stock_state['sell_fees'] += fees
+            stock_state['total_fees'] += fees
+            stock_state['latest_sell_time'] = trade_time_text
+
+            # 卖出净收入（扣除卖出侧费用）
+            unit_proceed = (amount - fees) / qty if qty > 0 else 0.0
+            remaining = qty
+            matched_cost = 0.0
+
+            lots = stock_state['lots']
+            while remaining > 0 and lots:
+                lot = lots[0]
+                lot_qty = int(lot.get('qty') or 0)
+                if lot_qty <= 0:
+                    lots.popleft()
+                    continue
+                matched = min(remaining, lot_qty)
+                matched_cost += matched * float(lot.get('unit_cost') or 0.0)
+                lot['qty'] = lot_qty - matched
+                remaining -= matched
+                if lot['qty'] <= 0:
+                    lots.popleft()
+
+            if remaining > 0:
+                stock_state['oversold_qty'] += remaining
+                # 超卖部分按零成本估算（仅做提示口径）
+                matched_cost += 0.0
+
+            realized_income = qty * unit_proceed
+            stock_state['realized_pnl'] += realized_income - matched_cost
+
+        data = []
+        summary = {
+            'stock_count': 0,
+            'buy_amount': 0.0,
+            'sell_amount': 0.0,
+            'total_fees': 0.0,
+            'realized_pnl': 0.0,
+            'pnl_ready_stock_count': 0,
+            'pnl_pending_stock_count': 0,
+            'holding_cost': 0.0,
+            'holding_qty': 0,
+            'net_cash_flow': 0.0,
+            'oversold_qty': 0,
+        }
+
+        for item in per_stock.values():
+            lots = item.get('lots') or []
+            holding_qty = int(sum(int(lot.get('qty') or 0) for lot in lots))
+            holding_cost = float(sum(int(lot.get('qty') or 0) * float(lot.get('unit_cost') or 0.0) for lot in lots))
+            avg_holding_cost = (holding_cost / holding_qty) if holding_qty > 0 else 0.0
+            net_cash_flow = (
+                float(item.get('sell_amount') or 0.0)
+                - float(item.get('buy_amount') or 0.0)
+                - float(item.get('total_fees') or 0.0)
+            )
+            buy_count = int(item.get('buy_count') or 0)
+            sell_count = int(item.get('sell_count') or 0)
+            buy_qty_total = int(item.get('buy_qty') or 0)
+            sell_qty_total = int(item.get('sell_qty') or 0)
+            # 口径：按数量判断是否具备盈亏计算条件（任意一方为0则待补充）。
+            pnl_ready = buy_qty_total > 0 and sell_qty_total > 0
+            if pnl_ready:
+                pnl_block_reason = ''
+            elif buy_qty_total <= 0 and sell_qty_total <= 0:
+                pnl_block_reason = '缺少买卖点，请补充'
+            elif buy_qty_total <= 0:
+                pnl_block_reason = '缺少买点，请补充'
+            else:
+                pnl_block_reason = '缺少卖点，请补充'
+            realized_pnl_value = round(float(item.get('realized_pnl') or 0.0), 2)
+
+            row = {
+                'stock_code': item.get('stock_code') or '',
+                'stock_name': item.get('stock_name') or '',
+                'buy_count': buy_count,
+                'sell_count': sell_count,
+                'buy_qty': int(item.get('buy_qty') or 0),
+                'sell_qty': int(item.get('sell_qty') or 0),
+                'holding_qty': holding_qty,
+                'buy_amount': round(float(item.get('buy_amount') or 0.0), 2),
+                'sell_amount': round(float(item.get('sell_amount') or 0.0), 2),
+                'total_fees': round(float(item.get('total_fees') or 0.0), 2),
+                'realized_pnl': realized_pnl_value if pnl_ready else None,
+                'pnl_ready': pnl_ready,
+                'pnl_block_reason': pnl_block_reason,
+                'holding_cost': round(holding_cost, 2),
+                'avg_holding_cost': round(avg_holding_cost, 4),
+                'net_cash_flow': round(net_cash_flow, 2),
+                'oversold_qty': int(item.get('oversold_qty') or 0),
+                'latest_buy_time': item.get('latest_buy_time') or '',
+                'latest_sell_time': item.get('latest_sell_time') or '',
+            }
+            data.append(row)
+
+            summary['stock_count'] += 1
+            summary['buy_amount'] += row['buy_amount']
+            summary['sell_amount'] += row['sell_amount']
+            summary['total_fees'] += row['total_fees']
+            if pnl_ready:
+                summary['realized_pnl'] += realized_pnl_value
+                summary['pnl_ready_stock_count'] += 1
+            else:
+                summary['pnl_pending_stock_count'] += 1
+            summary['holding_cost'] += row['holding_cost']
+            summary['holding_qty'] += row['holding_qty']
+            summary['net_cash_flow'] += row['net_cash_flow']
+            summary['oversold_qty'] += row['oversold_qty']
+
+        data.sort(key=lambda x: (x.get('realized_pnl') or 0.0), reverse=True)
+        summary = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in summary.items()}
+        return data, summary
+    except Exception as e:
+        print(f"查询盈亏统计失败: {e}")
+        return [], {
+            'stock_count': 0,
+            'buy_amount': 0.0,
+            'sell_amount': 0.0,
+            'total_fees': 0.0,
+            'realized_pnl': 0.0,
+            'pnl_ready_stock_count': 0,
+            'pnl_pending_stock_count': 0,
+            'holding_cost': 0.0,
+            'holding_qty': 0,
+            'net_cash_flow': 0.0,
+            'oversold_qty': 0,
+        }
     finally:
         try:
             if cursor:

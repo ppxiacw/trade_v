@@ -189,3 +189,44 @@ def import_delivery_records():
     except Exception as e:
         return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
 
+
+@order_bp.route('/delivery-records/pnl-summary', methods=['GET'])
+def get_delivery_pnl_summary():
+    """按股票汇总交割单盈亏统计"""
+    try:
+        stock_code = request.args.get('stock_code')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        def normalize_date(raw_value, field_name):
+            text = str(raw_value or '').strip()
+            if not text:
+                return ''
+            if len(text) == 8 and text.isdigit():
+                text = f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+            try:
+                datetime.strptime(text, '%Y-%m-%d')
+            except ValueError:
+                raise ValueError(f'{field_name} 格式需为 YYYY-MM-DD')
+            return text
+
+        try:
+            normalized_start_date = normalize_date(start_date, 'start_date')
+            normalized_end_date = normalize_date(end_date, 'end_date')
+        except ValueError as ve:
+            return jsonify({'success': False, 'message': str(ve)}), 400
+
+        rows, summary = order_service.get_delivery_pnl_summary(
+            stock_code=stock_code,
+            start_date=normalized_start_date or None,
+            end_date=normalized_end_date or None,
+        )
+        return jsonify({
+            'success': True,
+            'data': rows,
+            'total': len(rows),
+            'summary': summary,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'服务器错误: {str(e)}'}), 500
+
