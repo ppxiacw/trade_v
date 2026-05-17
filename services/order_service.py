@@ -939,10 +939,13 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
             sell_count = int(item.get('sell_count') or 0)
             buy_qty_total = int(item.get('buy_qty') or 0)
             sell_qty_total = int(item.get('sell_qty') or 0)
+            oversold_qty_total = int(item.get('oversold_qty') or 0)
             # 口径：按数量判断是否具备盈亏计算条件（任意一方为0则待补充）。
-            pnl_ready = buy_qty_total > 0 and sell_qty_total > 0
+            pnl_ready = buy_qty_total > 0 and sell_qty_total > 0 and oversold_qty_total <= 0
             if pnl_ready:
                 pnl_block_reason = ''
+            elif oversold_qty_total > 0:
+                pnl_block_reason = '区间内卖出数量超过买入数量，请扩大日期范围补齐买点'
             elif buy_qty_total <= 0 and sell_qty_total <= 0:
                 pnl_block_reason = '缺少买卖点，请补充'
             elif buy_qty_total <= 0:
@@ -968,7 +971,7 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
                 'holding_cost': round(holding_cost, 2),
                 'avg_holding_cost': round(avg_holding_cost, 4),
                 'net_cash_flow': round(net_cash_flow, 2),
-                'oversold_qty': int(item.get('oversold_qty') or 0),
+                'oversold_qty': oversold_qty_total,
                 'latest_buy_time': item.get('latest_buy_time') or '',
                 'latest_sell_time': item.get('latest_sell_time') or '',
             }
@@ -985,7 +988,8 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
                 summary['pnl_pending_stock_count'] += 1
             summary['holding_cost'] += row['holding_cost']
             summary['holding_qty'] += row['holding_qty']
-            summary['net_cash_flow'] += row['net_cash_flow']
+            if pnl_ready:
+                summary['net_cash_flow'] += row['net_cash_flow']
             summary['oversold_qty'] += row['oversold_qty']
 
         data.sort(key=lambda x: (x.get('realized_pnl') or 0.0), reverse=True)

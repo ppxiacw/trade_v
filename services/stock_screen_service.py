@@ -1679,7 +1679,7 @@ def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict
     placeholders = ", ".join(["%s"] * len(query_dates))
     rows = exeQuery(
         f"""
-        SELECT ts_code, trade_date, close, pre_close, pct_chg, vol
+        SELECT ts_code, trade_date, close, pre_close, pct_chg, vol, low
         FROM stock_daily_kline
         WHERE trade_date IN ({placeholders})
         """,
@@ -1702,6 +1702,7 @@ def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict
             "pre_close": pre_close,
             "pct_chg": pct_chg,
             "vol": _safe_float((row or {}).get("vol")),
+            "low": _safe_float((row or {}).get("low")),
         }
 
     # 统一按“前一交易日收盘价”重算涨跌幅，避免 pre_close/pct_chg 脏数据导致回调筛选漏票。
@@ -1742,6 +1743,9 @@ def _is_consecutive_shrink_pullback(
     prev_volume = _safe_float(reference_day.get("vol"))
     if prev_volume is None or prev_volume <= 0:
         return False
+    reference_low = _safe_float(reference_day.get("low"))
+    if reference_low is None or reference_low <= 0:
+        return False
 
     for trade_day in follow_trade_dates:
         daily = series_by_date.get(trade_day)
@@ -1754,6 +1758,12 @@ def _is_consecutive_shrink_pullback(
         if volume is None or volume <= 0:
             return False
         if volume >= prev_volume:
+            return False
+        day_low = _safe_float(daily.get("low"))
+        if day_low is None:
+            return False
+        # 新要求：回调期间不得跌破起涨日（基准日）最低点。
+        if day_low < reference_low:
             return False
         prev_volume = volume
     return True
@@ -2038,7 +2048,10 @@ def screen_stocks_by_mv_and_pct(
                 "pullback_follow_trade_dates": [item.isoformat() for item in pullback_follow_trade_dates],
                 "lookback_days": int(lookback_days),
                 "pullback_days": int(effective_pullback_days),
-                "pullback_note": "筛选条件基于基准日涨幅/市值 + 基准日后连续N日缩量回调（N=lookback_days）。",
+                "pullback_note": (
+                    "筛选条件基于基准日涨幅/市值 + 基准日后连续N日缩量回调（N=lookback_days），"
+                    "且回调期间最低价不得跌破基准日最低价。"
+                ),
             }
         )
     else:
