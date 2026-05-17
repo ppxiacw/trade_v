@@ -836,7 +836,11 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
                     'realized_pnl': 0.0,
                     'oversold_qty': 0,
                     'latest_buy_time': '',
+                    'latest_buy_price': None,
+                    'latest_buy_qty': 0,
                     'latest_sell_time': '',
+                    'latest_sell_price': None,
+                    'latest_sell_qty': 0,
                     'lots': deque(),  # FIFO: [{'qty': int, 'unit_cost': float}]
                 },
             )
@@ -867,6 +871,8 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
                 stock_state['buy_fees'] += fees
                 stock_state['total_fees'] += fees
                 stock_state['latest_buy_time'] = trade_time_text
+                stock_state['latest_buy_price'] = float(row.get('trade_price') or 0.0)
+                stock_state['latest_buy_qty'] = qty
 
                 # 成本 = 买入金额 + 买入费用
                 unit_cost = (amount + fees) / qty if qty > 0 else 0.0
@@ -882,6 +888,8 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
             stock_state['sell_fees'] += fees
             stock_state['total_fees'] += fees
             stock_state['latest_sell_time'] = trade_time_text
+            stock_state['latest_sell_price'] = float(row.get('trade_price') or 0.0)
+            stock_state['latest_sell_qty'] = qty
 
             # 卖出净收入（扣除卖出侧费用）
             unit_proceed = (amount - fees) / qty if qty > 0 else 0.0
@@ -973,7 +981,19 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
                 'net_cash_flow': round(net_cash_flow, 2),
                 'oversold_qty': oversold_qty_total,
                 'latest_buy_time': item.get('latest_buy_time') or '',
+                'latest_buy_price': round(float(item.get('latest_buy_price') or 0.0), 3)
+                if item.get('latest_buy_time')
+                else None,
+                'latest_buy_qty': int(item.get('latest_buy_qty') or 0)
+                if item.get('latest_buy_time')
+                else 0,
                 'latest_sell_time': item.get('latest_sell_time') or '',
+                'latest_sell_price': round(float(item.get('latest_sell_price') or 0.0), 3)
+                if item.get('latest_sell_time')
+                else None,
+                'latest_sell_qty': int(item.get('latest_sell_qty') or 0)
+                if item.get('latest_sell_time')
+                else 0,
             }
             data.append(row)
 
@@ -992,7 +1012,7 @@ def get_delivery_pnl_summary(stock_code=None, start_date=None, end_date=None):
                 summary['net_cash_flow'] += row['net_cash_flow']
             summary['oversold_qty'] += row['oversold_qty']
 
-        data.sort(key=lambda x: (x.get('realized_pnl') or 0.0), reverse=True)
+        data.sort(key=lambda x: str(x.get('latest_buy_time') or ''), reverse=True)
         summary = {k: (round(v, 2) if isinstance(v, float) else v) for k, v in summary.items()}
         return data, summary
     except Exception as e:
