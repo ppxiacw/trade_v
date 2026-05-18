@@ -13,6 +13,9 @@ from monitor.services.volume_radio import get_volume_ratio_simple
 from monitor.config.db_monitor import db_manager, stock_alert_dao
 from monitor.config.stock_code import normalize_monitor_stock_code
 from runtime_state import get_alert_checker, get_alert_sender, get_config, get_stock_data
+from utils.gtimg_quote import attach_intraday_quotes_to_stocks
+
+_INTRADAY_QUOTE_FIELDS = ('pct_chg', 'price')
 
 monitor_bp = Blueprint('monitor', __name__)
 _monitor_columns_lock = threading.Lock()
@@ -607,6 +610,19 @@ def calculate_ma_distances(stock_codes=None):
 
 # ==================== 监控股票管理接口 ====================
 
+def _strip_intraday_quote_fields(stocks):
+    cleaned = []
+    for stock in stocks or []:
+        if not isinstance(stock, dict):
+            cleaned.append(stock)
+            continue
+        row = dict(stock)
+        for key in _INTRADAY_QUOTE_FIELDS:
+            row.pop(key, None)
+        cleaned.append(row)
+    return cleaned
+
+
 @monitor_bp.route('/stocks', methods=['GET'])
 def get_monitor_stocks():
     """获取监控中的股票列表"""
@@ -614,7 +630,12 @@ def get_monitor_stocks():
         cache_key = "monitor:stocks:list"
         cached = _cache_get(cache_key)
         if cached is not None:
-            return jsonify(cached)
+            cached_stocks = [dict(item) for item in (cached.get('data') or [])]
+            attach_intraday_quotes_to_stocks(cached_stocks)
+            return jsonify({
+                **cached,
+                'data': cached_stocks,
+            })
 
         _ensure_monitor_stock_columns_once()
         _repair_monitor_sort_orders()
@@ -678,7 +699,16 @@ def get_monitor_stocks():
             'data': stocks,
             'total': len(stocks)
         }
-        _cache_set(cache_key, payload, _CACHE_TTL_STOCKS)
+        _cache_set(
+            cache_key,
+            {
+                'success': True,
+                'data': _strip_intraday_quote_fields(stocks),
+                'total': len(stocks),
+            },
+            _CACHE_TTL_STOCKS,
+        )
+        attach_intraday_quotes_to_stocks(stocks)
         return jsonify(payload)
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
