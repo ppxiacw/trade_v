@@ -9,6 +9,8 @@ import requests
 from utils.tushare_utils import IndexAnalysis
 from utils.IndicatorCalculation import IndicatorCalculation
 from utils.GetStockData import get_stock_name
+from utils.divergence_detect import calculate_macd_hist_series, detect_divergence
+from utils.divergence_service import fetch_kline_rows
 from monitor.config.db_monitor import db_manager
 
 _logger = logging.getLogger(__name__)
@@ -321,14 +323,13 @@ class AlertChecker:
             if not self._should_scan_divergence(stock, period, now_ts, scan_interval_seconds):
                 continue
 
-            kline_rows = self._fetch_kline_rows(stock, period, kline_count)
+            kline_rows = fetch_kline_rows(stock, period, kline_count)
             if len(kline_rows) < max(60, lookback * 12):
                 continue
 
             close_values = [item['close'] for item in kline_rows]
-            macd_dif = self._calculate_macd_dif_series(close_values)
-
-            macd_divergence = self._detect_divergence(kline_rows, macd_dif, lookback)
+            macd_hist = calculate_macd_hist_series(close_values)
+            macd_divergence = detect_divergence(kline_rows, macd_hist, lookback)
 
             candidates = []
             if stock_divergence_cfg.get('macd_enabled'):

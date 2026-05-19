@@ -14,6 +14,7 @@ from monitor.config.db_monitor import db_manager, stock_alert_dao
 from monitor.config.stock_code import normalize_monitor_stock_code
 from runtime_state import get_alert_checker, get_alert_sender, get_config, get_stock_data
 from utils.gtimg_quote import attach_intraday_quotes_to_stocks
+from utils.divergence_service import compute_divergence_points
 
 _INTRADAY_QUOTE_FIELDS = ('pct_chg', 'price')
 
@@ -990,6 +991,82 @@ def post_divergence_alert():
                 'cooldown': cooldown,
             }
         })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+def _find_monitor_stock_row(stock_code):
+    code = normalize_monitor_stock_code(stock_code)
+    if not code:
+        return None
+    rows = db_manager.execute_query(
+        "SELECT * FROM stocks WHERE stock_code = %s LIMIT 1",
+        (code,),
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    _apply_divergence_defaults_to_stock(row)
+    return row
+
+
+def _resolve_divergence_detect_params(stock_code, query_kline_count=None, query_lookback=None):
+    checker = get_alert_checker()
+    global_cfg = checker.get_divergence_config()
+
+    kline_count = _to_int_or_none(query_kline_count)
+    lookback = _to_int_or_none(query_lookback)
+
+    stock_row = _find_monitor_stock_row(stock_code)
+    if stock_row:
+        if kline_count is None:
+            kline_count = _to_int_or_none(stock_row.get('divergence_kline_count'))
+        if lookback is None:
+            lookback = _to_int_or_none(stock_row.get('divergence_lookback'))
+
+    if kline_count is None:
+        kline_count = max(120, int(global_cfg.get('kline_count') or 240))
+    else:
+        kline_count = max(120, kline_count)
+
+    if lookback is None:
+        lookback = max(2, int(global_cfg.get('lookback') or 3))
+    else:
+        lookback = max(2, lookback)
+
+    return kline_count, lookback
+
+
+@monitor_bp.route('/divergence/detect', methods=['GET'])
+def get_divergence_detect():
+    """图表背离检测（与监控告警同一套 K 线样本与算法）。"""
+    try:
+        stock_code = normalize_monitor_stock_code(request.args.get('stock_code'))
+        if not stock_code:
+            return jsonify({'success': False, 'message': '缺少有效股票代码'}), 400
+
+        period = str(request.args.get('period') or 'm30').strip().lower()
+        if period not in _DIVERGENCE_ALLOWED_PERIODS:
+            return jsonify({'success': False, 'message': f'不支持的周期: {period}'}), 400
+
+        indicator = str(request.args.get('indicator') or 'macd').strip().lower()
+        if indicator != 'macd':
+            return jsonify({'success': False, 'message': 'indicator 仅支持 macd'}), 400
+
+        kline_count, lookback = _resolve_divergence_detect_params(
+            stock_code,
+            request.args.get('kline_count'),
+            request.args.get('lookback'),
+        )
+
+        result = compute_divergence_points(
+            stock_code,
+            period,
+            kline_count=kline_count,
+            lookback=lookback,
+            indicator=indicator,
+        )
+        return jsonify({'success': True, 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

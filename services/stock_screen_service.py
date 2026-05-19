@@ -1775,6 +1775,7 @@ def screen_stocks_by_mv_and_pct(
     limit: int = 3000,
     trade_date: Optional[str] = None,
     lookback_days: int = 0,
+    min_price: float = 0.0,
 ) -> Tuple[List[dict], dict]:
     requested_trade_date = _parse_trade_date_input(trade_date)
     effective_trade_date = None
@@ -1958,6 +1959,10 @@ def screen_stocks_by_mv_and_pct(
             continue
         if mv_filter_ref < float(min_mv_yi) or pct_filter_ref < float(min_pct_chg):
             continue
+        if float(min_price) > 0:
+            price_ref = _safe_float(price)
+            if price_ref is None or price_ref < float(min_price):
+                continue
 
         nm = (q.get("name_raw") or "").strip() or name_hint
         fmv = q.get("float_mv_yi")

@@ -85,6 +85,7 @@ def screen_mv_pct():
     查询参数：
       min_mv_yi: 最小总市值（亿元），默认 0（无要求）
       min_pct_chg: 最小涨跌幅（%），默认 0
+      min_price: 最小股价（元），默认 0（无要求），过滤低于该价的股票
       limit: 最大返回条数，默认 3000，最大 8000
       trade_date: 可选，历史日期（YYYY-MM-DD / YYYYMMDD）
       lookback_days: 可选，基准日向前偏移 N 个交易日（默认 0=关闭）
@@ -93,12 +94,15 @@ def screen_mv_pct():
     try:
         min_mv_yi = request.args.get('min_mv_yi', default=0.0, type=float)
         min_pct_chg = request.args.get('min_pct_chg', default=0.0, type=float)
+        min_price = request.args.get('min_price', default=0.0, type=float)
         limit = request.args.get('limit', default=3000, type=int)
         trade_date = (request.args.get('trade_date', default='', type=str) or '').strip()
         lookback_days = request.args.get('lookback_days', default=0, type=int)
 
         if min_mv_yi < 0:
             return jsonify({'success': False, 'message': 'min_mv_yi 不能为负数'}), 400
+        if min_price < 0:
+            return jsonify({'success': False, 'message': 'min_price 不能为负数'}), 400
         if limit < 1 or limit > 8000:
             return jsonify({'success': False, 'message': 'limit 需在 1～8000 之间'}), 400
         if lookback_days < 0 or lookback_days > 120:
@@ -110,6 +114,7 @@ def screen_mv_pct():
             limit=limit,
             trade_date=trade_date or None,
             lookback_days=lookback_days,
+            min_price=min_price,
         )
         return jsonify({
             'success': True,
@@ -119,6 +124,7 @@ def screen_mv_pct():
             'params': {
                 'min_mv_yi': min_mv_yi,
                 'min_pct_chg': min_pct_chg,
+                'min_price': min_price,
                 'limit': limit,
                 'trade_date': trade_date or None,
                 'lookback_days': lookback_days,
