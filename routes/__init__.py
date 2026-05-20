@@ -13,6 +13,7 @@ def register_routes(app: Flask):
     from .monitor_routes import monitor_bp
     from .indicator_routes import indicator_bp
     from .no_buy_reason_routes import no_buy_reason_bp
+    from .order_gate_routes import order_gate_bp
     
     # 注册蓝图，统一使用 /api 前缀
     app.register_blueprint(stock_bp, url_prefix='/api')
@@ -21,4 +22,5 @@ def register_routes(app: Flask):
     app.register_blueprint(monitor_bp, url_prefix='/api/monitor')
     app.register_blueprint(indicator_bp, url_prefix='/api/indicator')
     app.register_blueprint(no_buy_reason_bp, url_prefix='/api')
+    app.register_blueprint(order_gate_bp, url_prefix='/api')
 
