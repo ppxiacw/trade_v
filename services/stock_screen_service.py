@@ -1930,6 +1930,9 @@ def screen_stocks_by_mv_and_pct(
             if estimated_mv is not None:
                 historical_mv_estimated_count += 1
             mv_yi = estimated_mv
+            # 历史模式必须用当日日K涨跌幅/市值参与筛选，不能与实时行情混用
+            pct_filter_ref = pct
+            mv_filter_ref = mv_yi
 
         if pullback_filter_enabled:
             if (
@@ -1948,12 +1951,22 @@ def screen_stocks_by_mv_and_pct(
                 follow_trade_dates=pullback_follow_trade_dates,
             ):
                 continue
-            pct_filter_ref = _safe_float(anchor_series.get("pct_chg"))
+            anchor_pct = _safe_float(anchor_series.get("pct_chg"))
+            anchor_close = _safe_float(anchor_series.get("close"))
+            pct_filter_ref = anchor_pct
             mv_filter_ref = _estimate_historical_mv_yi(
                 current_mv_yi=q.get("total_mv_yi"),
                 current_price=q.get("price"),
-                historical_close=anchor_series.get("close"),
+                historical_close=anchor_close,
             )
+            # 缩量回调：筛选与展示均以基准日（anchor）口径为准
+            if anchor_pct is not None:
+                pct = anchor_pct
+            if anchor_close is not None:
+                price = anchor_close
+            anchor_mv = mv_filter_ref
+            if anchor_mv is not None:
+                mv_yi = anchor_mv
 
         if mv_filter_ref is None or pct_filter_ref is None:
             continue
@@ -2084,4 +2097,168 @@ def screen_stocks_by_mv_and_pct(
                 "ths_theme_note": "板块/概念走势优先同花顺，失败时回退东方财富实时榜单，与历史筛选日期不强绑定。",
             }
         )
+    return rows, meta
+
+
+def _load_trade_dates_after(start_trade_date: date, count: int) -> List[date]:
+    if count < 1:
+        return []
+    rows = exeQuery(
+        """
+        SELECT DISTINCT trade_date
+        FROM stock_daily_kline
+        WHERE trade_date > %s
+        ORDER BY trade_date ASC
+        LIMIT %s
+        """,
+        (start_trade_date, int(count)),
+    ) or []
+    out: List[date] = []
+    for row in rows:
+        normalized = _normalize_db_trade_date((row or {}).get("trade_date"))
+        if normalized is not None:
+            out.append(normalized)
+    return out
+
+
+def _load_close_map_for_trade_date(trade_date: date, ts_codes: List[str]) -> Dict[str, float]:
+    if not ts_codes:
+        return {}
+    out: Dict[str, float] = {}
+    unique_codes = list(dict.fromkeys(str(code or "").strip().upper() for code in ts_codes if str(code or "").strip()))
+    chunk_size = 600
+    for i in range(0, len(unique_codes), chunk_size):
+        chunk = unique_codes[i : i + chunk_size]
+        if not chunk:
+            continue
+        placeholders = ", ".join(["%s"] * len(chunk))
+        rows = exeQuery(
+            f"""
+            SELECT ts_code, close
+            FROM stock_daily_kline
+            WHERE trade_date = %s
+              AND ts_code IN ({placeholders})
+            """,
+            (trade_date, *chunk),
+        ) or []
+        for item in rows:
+            ts_code = str(item.get("ts_code") or "").strip().upper()
+            close = _safe_float(item.get("close"))
+            if ts_code and close is not None and close > 0:
+                out[ts_code] = close
+    return out
+
+
+def backtest_screen_stocks_by_mv_and_pct(
+    min_mv_yi: float,
+    min_pct_chg: float,
+    limit: int,
+    trade_date: str,
+    forward_days: int,
+    lookback_days: int = 0,
+    min_price: float = 0.0,
+) -> Tuple[List[dict], dict]:
+    """
+    市值筛选复盘：在指定交易日按与 /screen/mv_pct 相同规则筛选，
+    并计算筛选基准日收盘价 → 其后第 forward_days 个交易日收盘价的涨幅。
+    """
+    if not str(trade_date or "").strip():
+        raise ValueError("复盘必须指定 trade_date（筛选基准日）")
+    forward_days_int = int(forward_days)
+    if forward_days_int < 1 or forward_days_int > 120:
+        raise ValueError("forward_days 需在 1～120 之间")
+
+    rows, meta = screen_stocks_by_mv_and_pct(
+        min_mv_yi=min_mv_yi,
+        min_pct_chg=min_pct_chg,
+        limit=limit,
+        trade_date=trade_date,
+        lookback_days=lookback_days,
+        min_price=min_price,
+    )
+
+    effective_text = str(meta.get("effective_trade_date") or meta.get("requested_trade_date") or "").strip()
+    if not effective_text:
+        raise RuntimeError("无法解析筛选基准交易日，请确认日K库已同步")
+    entry_date = datetime.strptime(effective_text[:10], "%Y-%m-%d").date()
+
+    forward_dates = _load_trade_dates_after(entry_date, forward_days_int)
+    if len(forward_dates) < forward_days_int:
+        latest = _resolve_latest_trade_date()
+        latest_text = latest.isoformat() if latest else "无"
+        raise RuntimeError(
+            f"筛选基准日 {entry_date.isoformat()} 之后仅有 {len(forward_dates)} 个交易日，"
+            f"不足 forward_days={forward_days_int}（库内最新交易日：{latest_text}）。"
+            "请缩小 N 或先补齐日K数据。"
+        )
+    forward_date = forward_dates[forward_days_int - 1]
+
+    ts_codes: List[str] = []
+    row_ts_pairs: List[Tuple[dict, str]] = []
+    for row in rows:
+        ts = _prefix_to_ts_code(row.get("stock_code") or "")
+        if not ts:
+            row["entry_trade_date"] = entry_date.isoformat()
+            row["entry_close"] = None
+            row["forward_trade_date"] = forward_date.isoformat()
+            row["forward_close"] = None
+            row["forward_pct_chg"] = None
+            row["forward_note"] = "代码无法解析"
+            continue
+        ts_upper = ts.upper()
+        ts_codes.append(ts_upper)
+        row_ts_pairs.append((row, ts_upper))
+
+    unique_ts = list(dict.fromkeys(ts_codes))
+    entry_close_map = _load_close_map_for_trade_date(entry_date, unique_ts)
+    forward_close_map = _load_close_map_for_trade_date(forward_date, unique_ts)
+
+    filled = 0
+    missing = 0
+    pct_values: List[float] = []
+    for row, ts in row_ts_pairs:
+        entry_close = entry_close_map.get(ts)
+        forward_close = forward_close_map.get(ts)
+        row["entry_trade_date"] = entry_date.isoformat()
+        row["forward_trade_date"] = forward_date.isoformat()
+        row["entry_close"] = round(entry_close, 4) if entry_close is not None else None
+        row["forward_close"] = round(forward_close, 4) if forward_close is not None else None
+        if entry_close is None or forward_close is None or entry_close <= 0:
+            row["forward_pct_chg"] = None
+            row["forward_note"] = "缺少日K收盘价"
+            missing += 1
+            continue
+        forward_pct = ((forward_close - entry_close) / entry_close) * 100
+        row["forward_pct_chg"] = round(forward_pct, 4)
+        row["forward_note"] = ""
+        filled += 1
+        pct_values.append(forward_pct)
+
+    rows.sort(
+        key=lambda item: (
+            item.get("forward_pct_chg") is None,
+            -(item.get("forward_pct_chg") if item.get("forward_pct_chg") is not None else -9999),
+        )
+    )
+
+    win_count = sum(1 for value in pct_values if value > 0)
+    avg_pct = (sum(pct_values) / len(pct_values)) if pct_values else None
+    meta.update(
+        {
+            "mode": "backtest",
+            "forward_days": forward_days_int,
+            "entry_trade_date": entry_date.isoformat(),
+            "forward_trade_date": forward_date.isoformat(),
+            "forward_filled_count": filled,
+            "forward_missing_count": missing,
+            "forward_avg_pct_chg": round(avg_pct, 4) if avg_pct is not None else None,
+            "forward_win_count": win_count,
+            "forward_win_rate": round(win_count / len(pct_values) * 100, 2) if pct_values else None,
+            "forward_note": (
+                f"基准日（{entry_date.isoformat()}）收盘价 → "
+                f"第 {forward_days_int} 个交易日后（{forward_date.isoformat()}）收盘价涨幅；"
+                "按收盘价口径，未计交易费用。"
+            ),
+        }
+    )
     return rows, meta

@@ -11,6 +11,7 @@ from runtime_state import get_config, get_stock_data
 from utils.common import format_stock_code
 from services.stock_screen_service import (
     screen_stocks_by_mv_and_pct,
+    backtest_screen_stocks_by_mv_and_pct,
     load_future_events_by_stock_codes,
     load_theme_kline_data,
 )
@@ -141,6 +142,71 @@ def screen_mv_pct():
         return jsonify({
             'success': False,
             'message': f'{hint} 详情: {str(e)}',
+        }), 503
+
+
+@stock_bp.route('/screen/mv_pct_backtest', methods=['GET'])
+def screen_mv_pct_backtest():
+    """
+    市值筛选复盘：指定交易日按市值/涨幅等条件筛选，并计算筛选后 N 个交易日涨幅。
+    查询参数（在 /screen/mv_pct 基础上）：
+      trade_date: 必填，筛选基准日（YYYY-MM-DD / YYYYMMDD）
+      forward_days: 必填，筛选基准日之后第 N 个交易日的涨幅（1～120）
+      其余参数同 /screen/mv_pct（min_mv_yi、min_pct_chg、min_price、limit、lookback_days）
+    """
+    try:
+        min_mv_yi = request.args.get('min_mv_yi', default=0.0, type=float)
+        min_pct_chg = request.args.get('min_pct_chg', default=0.0, type=float)
+        min_price = request.args.get('min_price', default=0.0, type=float)
+        limit = request.args.get('limit', default=3000, type=int)
+        trade_date = (request.args.get('trade_date', default='', type=str) or '').strip()
+        lookback_days = request.args.get('lookback_days', default=0, type=int)
+        forward_days = request.args.get('forward_days', default=0, type=int)
+
+        if not trade_date:
+            return jsonify({'success': False, 'message': 'trade_date 为必填（筛选基准日）'}), 400
+        if forward_days < 1 or forward_days > 120:
+            return jsonify({'success': False, 'message': 'forward_days 需在 1～120 之间'}), 400
+        if min_mv_yi < 0:
+            return jsonify({'success': False, 'message': 'min_mv_yi 不能为负数'}), 400
+        if min_price < 0:
+            return jsonify({'success': False, 'message': 'min_price 不能为负数'}), 400
+        if limit < 1 or limit > 8000:
+            return jsonify({'success': False, 'message': 'limit 需在 1～8000 之间'}), 400
+        if lookback_days < 0 or lookback_days > 120:
+            return jsonify({'success': False, 'message': 'lookback_days 需在 0～120 之间'}), 400
+
+        data, meta = backtest_screen_stocks_by_mv_and_pct(
+            min_mv_yi=min_mv_yi,
+            min_pct_chg=min_pct_chg,
+            limit=limit,
+            trade_date=trade_date,
+            forward_days=forward_days,
+            lookback_days=lookback_days,
+            min_price=min_price,
+        )
+        return jsonify({
+            'success': True,
+            'data': data,
+            'count': len(data),
+            'meta': meta,
+            'params': {
+                'min_mv_yi': min_mv_yi,
+                'min_pct_chg': min_pct_chg,
+                'min_price': min_price,
+                'limit': limit,
+                'trade_date': trade_date,
+                'lookback_days': lookback_days,
+                'forward_days': forward_days,
+            },
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+    except Exception as e:
+        _logger.exception('screen_mv_pct_backtest 失败')
+        return jsonify({
+            'success': False,
+            'message': f'筛选复盘失败，请稍后重试。详情: {str(e)}',
         }), 503
 
 
