@@ -9,7 +9,11 @@ import requests
 from utils.tushare_utils import IndexAnalysis
 from utils.IndicatorCalculation import IndicatorCalculation
 from utils.GetStockData import get_stock_name
-from utils.divergence_detect import calculate_macd_hist_series, detect_divergence
+from utils.divergence_detect import (
+    calculate_macd_dif_series,
+    detect_divergence,
+    select_chart_divergence_points,
+)
 from utils.divergence_service import fetch_kline_rows
 from monitor.config.db_monitor import db_manager
 
@@ -328,15 +332,17 @@ class AlertChecker:
                 continue
 
             close_values = [item['close'] for item in kline_rows]
-            macd_hist = calculate_macd_hist_series(close_values)
-            macd_divergence = detect_divergence(kline_rows, macd_hist, lookback)
+            macd_dif = calculate_macd_dif_series(close_values)
+            macd_divergence = detect_divergence(kline_rows, macd_dif, period)
+            chart_top = select_chart_divergence_points(macd_divergence['top'])
+            chart_bottom = select_chart_divergence_points(macd_divergence['bottom'])
 
             candidates = []
             if stock_divergence_cfg.get('macd_enabled'):
                 if stock_divergence_cfg.get('top_enabled'):
-                    candidates.append(('MACD', 'top', macd_divergence['top'][-1] if macd_divergence['top'] else None))
+                    candidates.append(('MACD', 'top', chart_top[-1] if chart_top else None))
                 if stock_divergence_cfg.get('bottom_enabled'):
-                    candidates.append(('MACD', 'bottom', macd_divergence['bottom'][-1] if macd_divergence['bottom'] else None))
+                    candidates.append(('MACD', 'bottom', chart_bottom[-1] if chart_bottom else None))
             if not candidates:
                 continue
 
@@ -431,7 +437,7 @@ class AlertChecker:
         return {
             'enabled': self._to_bool(stock_cfg.get('divergence_enabled'), False),
             'macd_enabled': self._to_bool(stock_cfg.get('divergence_macd_enabled'), True),
-            'rsi_enabled': self._to_bool(stock_cfg.get('divergence_rsi_enabled'), True),
+            'rsi_enabled': False,
             'top_enabled': self._to_bool(stock_cfg.get('divergence_top_enabled'), True),
             'bottom_enabled': self._to_bool(stock_cfg.get('divergence_bottom_enabled'), True),
             'periods': periods,
@@ -542,33 +548,7 @@ class AlertChecker:
             return []
 
     def _calculate_macd_dif_series(self, close_values, short_period=12, long_period=26, signal_period=9):
-        if not close_values:
-            return []
-        ema_short = []
-        ema_long = []
-        dif_values = []
-        dea_values = []
-
-        for i, close_price in enumerate(close_values):
-            if i == 0:
-                ema_short.append(close_price)
-                ema_long.append(close_price)
-                dif_values.append(0.0)
-                dea_values.append(0.0)
-                continue
-            prev_ema_short = ema_short[-1]
-            prev_ema_long = ema_long[-1]
-            current_ema_short = (close_price * 2 / (short_period + 1)) + (prev_ema_short * (1 - 2 / (short_period + 1)))
-            current_ema_long = (close_price * 2 / (long_period + 1)) + (prev_ema_long * (1 - 2 / (long_period + 1)))
-            ema_short.append(current_ema_short)
-            ema_long.append(current_ema_long)
-
-            dif = current_ema_short - current_ema_long
-            dif_values.append(dif)
-            dea = (dif * 2 / (signal_period + 1)) + (dea_values[-1] * (1 - 2 / (signal_period + 1)))
-            dea_values.append(dea)
-
-        return [round(v, 4) for v in dif_values]
+        return calculate_macd_dif_series(close_values, short_period, long_period, signal_period)
 
     def _calculate_rsi_series(self, close_values, period=14):
         length = len(close_values)

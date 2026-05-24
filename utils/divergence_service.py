@@ -1,5 +1,5 @@
 """
-背离检测服务：与监控告警共用同一套 K 线拉取与 detect_divergence 逻辑。
+背离检测服务：与 K 线页、监控告警共用 MACD(DIF) 与 detect_divergence / select_chart 逻辑。
 """
 from __future__ import annotations
 
@@ -9,7 +9,11 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from utils.divergence_detect import calculate_macd_hist_series, detect_divergence
+from utils.divergence_detect import (
+    calculate_macd_dif_series,
+    detect_divergence,
+    select_chart_divergence_points,
+)
 
 _JSONP_TAIL_RE = re.compile(r'=\s*(\{.*\})\s*;?\s*$', re.DOTALL)
 
@@ -163,9 +167,13 @@ def compute_divergence_points(
         }
 
     close_values = [item['close'] for item in kline_rows]
-    macd_hist = calculate_macd_hist_series(close_values)
-    divergence = detect_divergence(kline_rows, macd_hist, lookback_value)
-    points = _attach_time_to_points(kline_rows, divergence)
+    macd_dif = calculate_macd_dif_series(close_values)
+    divergence = detect_divergence(kline_rows, macd_dif, period_key)
+    chart_divergence = {
+        'top': select_chart_divergence_points(divergence['top']),
+        'bottom': select_chart_divergence_points(divergence['bottom']),
+    }
+    points = _attach_time_to_points(kline_rows, chart_divergence)
 
     return {
         'stock_code': stock_code,
