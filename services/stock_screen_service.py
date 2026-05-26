@@ -37,6 +37,8 @@ _EM_HEADERS = {
 # 31: 涨跌额, 32: 涨跌幅(%), 44: 总市值(亿元)
 _IDX_NAME = 1
 _IDX_PRICE = 3
+_IDX_PRE_CLOSE = 4
+_IDX_HIGH = 33
 _IDX_CHG_AMT = 31
 _IDX_PCT = 32
 _IDX_TURNOVER_RATE = 38
@@ -87,6 +89,19 @@ def _disable_proxy_for_requests() -> None:
     for key in list(os.environ.keys()):
         if key.lower() in ("http_proxy", "https_proxy", "all_proxy"):
             os.environ.pop(key, None)
+
+
+def _intraday_high_pct_chg(
+    high: Any,
+    pre_close: Any,
+    fallback_pct: Any = None,
+) -> Optional[float]:
+    """按昨收计算日内最高价涨跌幅；缺 high/昨收时回退为收盘涨跌幅。"""
+    high_val = _safe_float(high)
+    pre = _safe_float(pre_close)
+    if high_val is not None and pre is not None and pre > 0:
+        return ((high_val - pre) / pre) * 100
+    return _safe_float(fallback_pct)
 
 
 def _safe_float(x: Any) -> Optional[float]:
@@ -1407,8 +1422,12 @@ def _parse_gtimg_response(text: str) -> List[dict]:
             continue
         name = parts[_IDX_NAME] if len(parts) > _IDX_NAME else ""
         price = _safe_float(parts[_IDX_PRICE]) if len(parts) > _IDX_PRICE else None
+        pre_close = _safe_float(parts[_IDX_PRE_CLOSE]) if len(parts) > _IDX_PRE_CLOSE else None
+        high = _safe_float(parts[_IDX_HIGH]) if len(parts) > _IDX_HIGH else None
         chg_amt = _safe_float(parts[_IDX_CHG_AMT]) if len(parts) > _IDX_CHG_AMT else None
         pct = _safe_float(parts[_IDX_PCT]) if len(parts) > _IDX_PCT else None
+        if pct is None and price is not None and pre_close not in (None, 0):
+            pct = ((price - pre_close) / pre_close) * 100
         turnover_rate = _safe_float(parts[_IDX_TURNOVER_RATE]) if len(parts) > _IDX_TURNOVER_RATE else None
         mv_yi = _safe_float(parts[_IDX_TOTAL_MV_YI])
         float_mv_yi = (
@@ -1421,6 +1440,8 @@ def _parse_gtimg_response(text: str) -> List[dict]:
                 "gtimg_symbol": gsym,
                 "name_raw": name,
                 "price": price,
+                "pre_close": pre_close,
+                "high": high,
                 "pct_chg": pct,
                 "change_amount": chg_amt,
                 "turnover_rate": turnover_rate,
@@ -1528,7 +1549,7 @@ def _resolve_effective_trade_date(requested_date: date) -> Optional[date]:
 def _load_daily_snapshot_map(trade_date: date) -> Dict[str, dict]:
     rows = exeQuery(
         """
-        SELECT ts_code, close, pre_close, pct_chg, change_amount, turnover_rate, vol, amount
+        SELECT ts_code, close, high, pre_close, pct_chg, change_amount, turnover_rate, vol, amount
         FROM stock_daily_kline
         WHERE trade_date = %s
         """,
@@ -1541,6 +1562,7 @@ def _load_daily_snapshot_map(trade_date: date) -> Dict[str, dict]:
         if not ts_code:
             continue
         close = _safe_float(item.get("close"))
+        high = _safe_float(item.get("high"))
         pre_close = _safe_float(item.get("pre_close"))
         pct_chg = _safe_float(item.get("pct_chg"))
         change_amount = _safe_float(item.get("change_amount"))
@@ -1551,6 +1573,7 @@ def _load_daily_snapshot_map(trade_date: date) -> Dict[str, dict]:
 
         out[ts_code] = {
             "close": close,
+            "high": high,
             "pct_chg": pct_chg,
             "change_amount": change_amount,
             "turnover_rate": _safe_float(item.get("turnover_rate")),
@@ -1603,6 +1626,7 @@ def _load_daily_snapshot_map(trade_date: date) -> Dict[str, dict]:
         snap["pre_close"] = prev_close_ref
         snap["change_amount"] = change_amount
         snap["pct_chg"] = pct_chg
+        snap["pct_chg_high"] = _intraday_high_pct_chg(snap.get("high"), prev_close_ref, pct_chg)
         snap["pct_recomputed"] = True
     return out
 
@@ -1679,7 +1703,7 @@ def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict
     placeholders = ", ".join(["%s"] * len(query_dates))
     rows = exeQuery(
         f"""
-        SELECT ts_code, trade_date, close, pre_close, pct_chg, vol, low
+        SELECT ts_code, trade_date, close, high, pre_close, pct_chg, vol, low
         FROM stock_daily_kline
         WHERE trade_date IN ({placeholders})
         """,
@@ -1699,6 +1723,7 @@ def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict
             pct_chg = ((close - pre_close) / pre_close) * 100
         day_series[trade_day] = {
             "close": close,
+            "high": _safe_float((row or {}).get("high")),
             "pre_close": pre_close,
             "pct_chg": pct_chg,
             "vol": _safe_float((row or {}).get("vol")),
@@ -1722,6 +1747,11 @@ def _load_daily_series_by_trade_dates(trade_dates: List[date]) -> Dict[str, Dict
             if prev_close_ref is not None and prev_close_ref > 0:
                 item["pre_close"] = prev_close_ref
                 item["pct_chg"] = ((close - prev_close_ref) / prev_close_ref) * 100
+                item["pct_chg_high"] = _intraday_high_pct_chg(
+                    item.get("high"),
+                    prev_close_ref,
+                    item.get("pct_chg"),
+                )
 
             prev_close_ref = close
             if trade_day in target_date_set:
@@ -1907,7 +1937,7 @@ def screen_stocks_by_mv_and_pct(
         volume = None
         amount = None
         mv_filter_ref = mv_yi
-        pct_filter_ref = pct
+        pct_filter_ref = _intraday_high_pct_chg(q.get("high"), q.get("pre_close"), pct)
 
         if effective_trade_date is not None:
             daily = daily_snapshot_map.get(ts_code.upper())
@@ -1930,8 +1960,14 @@ def screen_stocks_by_mv_and_pct(
             if estimated_mv is not None:
                 historical_mv_estimated_count += 1
             mv_yi = estimated_mv
-            # 历史模式必须用当日日K涨跌幅/市值参与筛选，不能与实时行情混用
-            pct_filter_ref = pct
+            # 历史模式：按当日最高价相对昨收的涨幅筛选（不要求收盘仍维持）
+            pct_filter_ref = daily.get("pct_chg_high")
+            if pct_filter_ref is None:
+                pct_filter_ref = _intraday_high_pct_chg(
+                    daily.get("high"),
+                    daily.get("pre_close"),
+                    pct,
+                )
             mv_filter_ref = mv_yi
 
         if pullback_filter_enabled:
@@ -1953,7 +1989,13 @@ def screen_stocks_by_mv_and_pct(
                 continue
             anchor_pct = _safe_float(anchor_series.get("pct_chg"))
             anchor_close = _safe_float(anchor_series.get("close"))
-            pct_filter_ref = anchor_pct
+            pct_filter_ref = anchor_series.get("pct_chg_high")
+            if pct_filter_ref is None:
+                pct_filter_ref = _intraday_high_pct_chg(
+                    anchor_series.get("high"),
+                    anchor_series.get("pre_close"),
+                    anchor_pct,
+                )
             mv_filter_ref = _estimate_historical_mv_yi(
                 current_mv_yi=q.get("total_mv_yi"),
                 current_price=q.get("price"),

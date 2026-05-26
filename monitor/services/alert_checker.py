@@ -14,6 +14,10 @@ from utils.divergence_detect import (
     detect_divergence,
     select_chart_divergence_points,
 )
+from utils.kline_forward_adjust import (
+    apply_forward_adjust_to_quote_rows,
+    fetch_daily_forward_factors,
+)
 from utils.divergence_service import fetch_kline_rows
 from monitor.config.db_monitor import db_manager
 
@@ -536,12 +540,21 @@ class AlertChecker:
                     low_value = float(item[4])
                 except (TypeError, ValueError):
                     continue
+                try:
+                    open_value = float(item[1])
+                except (TypeError, ValueError):
+                    open_value = close_value
                 rows.append({
                     'time': str(item[0]),
+                    'open': open_value,
                     'close': close_value,
                     'high': high_value,
                     'low': low_value,
                 })
+            if period not in {'day', 'week', 'month'} and rows:
+                factor_bars = max(120, min(2000, int(count or 240) // 3 + 80))
+                factors = fetch_daily_forward_factors(formatted_code, factor_bars)
+                rows = apply_forward_adjust_to_quote_rows(rows, factors)
             return rows
         except Exception as e:
             _logger.debug("拉取背离K线失败 stock=%s period=%s err=%s", stock_code, period, e)

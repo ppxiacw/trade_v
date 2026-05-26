@@ -14,6 +14,10 @@ from utils.divergence_detect import (
     detect_divergence,
     select_chart_divergence_points,
 )
+from utils.kline_forward_adjust import (
+    apply_forward_adjust_to_quote_rows,
+    fetch_daily_forward_factors,
+)
 
 _JSONP_TAIL_RE = re.compile(r'=\s*(\{.*\})\s*;?\s*$', re.DOTALL)
 
@@ -94,12 +98,21 @@ def fetch_kline_rows(stock_code: str, period: str, count: int) -> List[Dict[str,
                 low_value = float(item[4])
             except (TypeError, ValueError):
                 continue
+            try:
+                open_value = float(item[1])
+            except (TypeError, ValueError):
+                open_value = close_value
             rows.append({
                 'time': str(item[0]),
+                'open': open_value,
                 'close': close_value,
                 'high': high_value,
                 'low': low_value,
             })
+        if period_key not in {'day', 'week', 'month'} and rows:
+            factor_bars = max(120, min(2000, int(count or 240) // 3 + 80))
+            factors = fetch_daily_forward_factors(formatted_code, factor_bars)
+            rows = apply_forward_adjust_to_quote_rows(rows, factors)
         return rows
     except Exception:
         return []

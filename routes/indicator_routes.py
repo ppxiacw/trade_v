@@ -122,6 +122,16 @@ def fetch_kline_data(stock_code: str, period: str = 'm30', count: int = 100):
                 row = list(row) + [None] * (max_cols - len(row))
             normalized_data.append(row[:max_cols])
         
+        if period not in ['day', 'week', 'month'] and normalized_data:
+            from utils.kline_forward_adjust import (
+                apply_forward_adjust_to_kline_rows,
+                fetch_daily_forward_factors,
+            )
+
+            factor_bars = max(120, min(2000, int(count or 240) // 3 + 80))
+            factors = fetch_daily_forward_factors(formatted_code, factor_bars)
+            normalized_data = apply_forward_adjust_to_kline_rows(normalized_data, factors)
+
         df = pd.DataFrame(normalized_data, columns=columns)
         
         # 确保数值类型
