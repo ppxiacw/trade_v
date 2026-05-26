@@ -393,7 +393,8 @@ class AlertChecker:
                     stock,
                     alert_message,
                     _DIVERGENCE_PERIOD_WINDOW_SECONDS.get(period, 0),
-                    '背离'
+                    '背离',
+                    trigger_time=self._parse_signal_time_to_datetime(row.get('time')),
                 )
                 cooldown = _DIVERGENCE_PERIOD_COOLDOWN_SECONDS.get(period, self.config.ALERT_COOLDOWN)
                 alerts.append((alert_data, cooldown))
@@ -726,6 +727,38 @@ class AlertChecker:
         if re.fullmatch(r'\d{8}', value):
             return f"{value[0:4]}-{value[4:6]}-{value[6:8]}"
         return value
+
+    def _parse_signal_time_to_datetime(self, raw_time):
+        value = str(raw_time or '').strip()
+        if not value:
+            return None
+        if re.fullmatch(r'\d{12}', value):
+            return datetime(
+                int(value[0:4]),
+                int(value[4:6]),
+                int(value[6:8]),
+                int(value[8:10]),
+                int(value[10:12]),
+            )
+        if re.fullmatch(r'\d{8}', value):
+            return datetime(int(value[0:4]), int(value[4:6]), int(value[6:8]))
+        formatted = self._format_signal_time(value)
+        if formatted and formatted != value:
+            try:
+                if len(formatted) >= 16:
+                    return datetime.strptime(formatted[:16], '%Y-%m-%d %H:%M')
+                if len(formatted) >= 10:
+                    return datetime.strptime(formatted[:10], '%Y-%m-%d')
+            except ValueError:
+                return None
+        try:
+            return datetime.strptime(value[:19], '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            pass
+        try:
+            return datetime.strptime(value[:16], '%Y-%m-%d %H:%M')
+        except ValueError:
+            return None
 
     def _is_price_in_trigger_range(self, stock, current_price):
         cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
@@ -1073,7 +1106,7 @@ class AlertChecker:
                 last_k['close'] <= last_k['open'] and  # 当前阴线
                 last_k['amount'] > prev_k['amount'])  # 放量
 
-    def _create_alert_data(self, stock, alert_message, window_sec=None, alert_type='观察'):
+    def _create_alert_data(self, stock, alert_message, window_sec=None, alert_type='观察', trigger_time=None):
         """创建统一的警报数据结构"""
         alert_data = {
             'stock_code': stock,
@@ -1081,7 +1114,7 @@ class AlertChecker:
             'alert_type': alert_type,
             'alert_level': 2,
             'alert_message': alert_message,
-            'trigger_time': datetime.now()
+            'trigger_time': trigger_time or datetime.now()
         }
 
         if window_sec is not None:
