@@ -395,6 +395,7 @@ class AlertChecker:
                     _DIVERGENCE_PERIOD_WINDOW_SECONDS.get(period, 0),
                     '背离',
                     trigger_time=self._parse_signal_time_to_datetime(row.get('time')),
+                    chart_period=period,
                 )
                 cooldown = _DIVERGENCE_PERIOD_COOLDOWN_SECONDS.get(period, self.config.ALERT_COOLDOWN)
                 alerts.append((alert_data, cooldown))
@@ -469,6 +470,14 @@ class AlertChecker:
             'week': '周K',
             'month': '月K',
         }.get(period, period)
+
+    @staticmethod
+    def _minute_window_to_chart_period(window):
+        return {
+            1: 'm1',
+            5: 'm5',
+            30: 'm30',
+        }.get(int(window))
 
     def _normalize_stock_code_for_kline(self, stock_code):
         text = str(stock_code or '').strip()
@@ -1013,7 +1022,11 @@ class AlertChecker:
                 current_state['last_rsi_triggered'] = True
                 alert_type = '买点' if rsi_6 <= 20 else '卖点'
                 return self._create_alert_data(
-                    stock, f"({window}min)rsi_6:{rsi_6}", window, alert_type
+                    stock,
+                    f"({window}min)rsi_6:{rsi_6}",
+                    window,
+                    alert_type,
+                    chart_period=self._minute_window_to_chart_period(window),
                 )
             else:
                 current_state['last_rsi_triggered'] = True
@@ -1033,13 +1046,21 @@ class AlertChecker:
         # RSI低位反弹模式
         if window != 5 and pre_rsi_6 <= 20 and self._is_bullish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
-                stock, f"({window}min)rsi_6_up", window, '买点'
+                stock,
+                f"({window}min)rsi_6_up",
+                window,
+                '买点',
+                chart_period=self._minute_window_to_chart_period(window),
             ))
 
         # RSI高位回落模式
         if pre_rsi_6 >= 80 and self._is_bearish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
-                stock, f"({window}min)rsi_6_down", window, '卖点'
+                stock,
+                f"({window}min)rsi_6_down",
+                window,
+                '卖点',
+                chart_period=self._minute_window_to_chart_period(window),
             ))
 
         return alerts
@@ -1077,7 +1098,11 @@ class AlertChecker:
                 last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount'] and
                 rsi_6 < 20 and window != 5):
             return self._create_alert_data(
-                stock, f"({window}min)engulfing_up", window, '买点'
+                stock,
+                f"({window}min)engulfing_up",
+                window,
+                '买点',
+                chart_period=self._minute_window_to_chart_period(window),
             )
 
         # 阴包阳
@@ -1085,7 +1110,11 @@ class AlertChecker:
               last_k['close'] < last_k['open'] and last_k['amount'] > prev_k['amount'] and
               rsi_6 > 80):
             return self._create_alert_data(
-                stock, f"({window}min)engulfing_down", window, '卖点'
+                stock,
+                f"({window}min)engulfing_down",
+                window,
+                '卖点',
+                chart_period=self._minute_window_to_chart_period(window),
             )
 
         return None
@@ -1106,7 +1135,15 @@ class AlertChecker:
                 last_k['close'] <= last_k['open'] and  # 当前阴线
                 last_k['amount'] > prev_k['amount'])  # 放量
 
-    def _create_alert_data(self, stock, alert_message, window_sec=None, alert_type='观察', trigger_time=None):
+    def _create_alert_data(
+        self,
+        stock,
+        alert_message,
+        window_sec=None,
+        alert_type='观察',
+        trigger_time=None,
+        chart_period=None,
+    ):
         """创建统一的警报数据结构"""
         alert_data = {
             'stock_code': stock,
@@ -1119,6 +1156,8 @@ class AlertChecker:
 
         if window_sec is not None:
             alert_data['windows_sec'] = window_sec
+        if chart_period is not None:
+            alert_data['chart_period'] = chart_period
 
         return alert_data
 

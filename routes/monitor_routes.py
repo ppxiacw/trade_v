@@ -975,6 +975,7 @@ def post_divergence_alert():
             'alert_message': alert_message,
             'trigger_time': datetime.now(),
             'windows_sec': _DIVERGENCE_PERIOD_SECONDS.get(period, 0),
+            'chart_period': period,
         }
 
         get_alert_sender().send_alert(stock_code, [(alert_data, cooldown)], force_send=True)

@@ -14,29 +14,59 @@ _REQUEST_TIMEOUT = (
 ma_webhook_url = os.getenv('DINGTALK_WEBHOOK_MA', _DEFAULT_MA_WEBHOOK_URL)
 common = os.getenv('DINGTALK_WEBHOOK_COMMON', _DEFAULT_COMMON_WEBHOOK_URL)
 
+# 监控周期 -> 新浪缩略图 k_type
+_ALERT_PERIOD_TO_SINA_KTYPE = {
+    'm1': ('mink1', '1分钟'),
+    'm5': ('mink5', '5分钟'),
+    'm15': ('mink15', '15分钟'),
+    'm30': ('mink30', '30分钟'),
+    'day': ('daily', '日K'),
+    'week': ('weekly', '周K'),
+    'month': ('monthly', '月K'),
+}
+_DEFAULT_CHART_PRIMARY = ('min', '分时')
+_DEFAULT_CHART_SECONDARY = ('daily', '日K')
 
-def send_dingtalk_message(title, tsCode, webhook_url=common):
+
+def resolve_dingtalk_chart_types(chart_period=None):
+    """
+    根据告警周期选择钉钉附图。
+    有明确周期时：主图=对应 K 线，辅图=分时；否则：分时 + 日 K。
+    """
+    period = str(chart_period or '').strip().lower()
+    if period in _ALERT_PERIOD_TO_SINA_KTYPE:
+        primary = _ALERT_PERIOD_TO_SINA_KTYPE[period]
+        return primary, _DEFAULT_CHART_PRIMARY
+    return _DEFAULT_CHART_PRIMARY, _DEFAULT_CHART_SECONDARY
+
+
+def send_dingtalk_message(title, tsCode, chart_period=None, webhook_url=common):
     headers = {'Content-Type': 'application/json'}
-    image_url1 = generate_stock_image_url(tsCode)
-    image_url2 = generate_stock_image_url(tsCode, 'mink5')
+    (primary_k, primary_label), (secondary_k, secondary_label) = resolve_dingtalk_chart_types(chart_period)
+    image_url1 = generate_stock_image_url(tsCode, primary_k)
+    image_url2 = generate_stock_image_url(tsCode, secondary_k)
     if 'ma' in title:
         webhook_url = ma_webhook_url
     data = {
         "msgtype": "actionCard",
         "actionCard": {
             "title": f"{title}\n\n !",
-            "text": f"{title}\n\n ![走势缩略图1]({image_url1}) \n\n ![走势缩略图2]({image_url2})",
+            "text": (
+                f"{title}\n\n "
+                f"![{primary_label}]({image_url1}) \n\n "
+                f"![{secondary_label}]({image_url2})"
+            ),
             "btns": [
                 {
-                    "title": "分时图",
+                    "title": primary_label,
                     "actionURL": image_url1
                 },
                 {
-                    "title": "五分图",
+                    "title": secondary_label,
                     "actionURL": image_url2
                 }
             ],
-            "btnOrientation": "1"  # 设置按钮垂直排列，如果按钮多的话
+            "btnOrientation": "1"
         }
     }
     logging.info(title + "\n")
@@ -57,23 +87,16 @@ def send_dingtalk_message(title, tsCode, webhook_url=common):
 
 def generate_stock_image_url(stock_code: str, k_type='min') -> str:
     """
-    生成新浪股票日线图 URL（支持 000001.SH 格式）
+    生成新浪股票走势图 URL（支持 000001.SH 格式）
 
     :param stock_code: 股票代码（格式如 000001.SH 或 300750.SZ）
+    :param k_type: 新浪图表类型，如 min、mink5、daily
     :return: 图片 URL
     :raises ValueError: 格式错误时抛出异常
     """
-    # 格式校验（6位数字 + .SH/.SZ）
     if not re.match(r'^\d{6}\.(SH|SZ)$', stock_code, re.IGNORECASE):
         raise ValueError("股票代码格式错误，应为 6位数字 + .SH/.SZ，例如：000001.SH")
 
-    # 分割代码和交易所
     code_part, exchange_part = stock_code.upper().split('.')
-
-    # 转换为新浪需要的格式（sh/sz + 代码）
     sina_code = f"{exchange_part.lower()}{code_part}"
-
-    # 生成 URL
     return f"http://image.sinajs.cn/newchart/{k_type}/n/{sina_code}.gif?t={random.randint(0, 99999)}"
-
-# send_dingtalk_message('00001','000001.SH')

@@ -56,11 +56,10 @@ class AlertSender:
 
             # 构建显示消息
             alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {alert_data['trigger_time']}"
+            chart_period = alert_data.pop('chart_period', None)
 
-            # 发送钉钉消息
-            send_dingtalk_message(alert_info, stock)
+            send_dingtalk_message(alert_info, stock, chart_period=chart_period)
 
-            # 插入数据库 - 直接使用alert_data
             stock_alert_dao.insert_alert(alert_data)
 
     def _is_alert_time_allowed(self):
