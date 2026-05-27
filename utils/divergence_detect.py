@@ -7,93 +7,28 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
-DEFAULT_LOOKBACK = 3
+class PivotConfig(TypedDict):
+    pivot_left: int
+    pivot_right: int
+    range_lower: int
+    range_upper: int
 
 
-class SwingConfig(TypedDict):
-    swing_radius: int
-    merge_within_bars: int
-    dif_window: int
-    min_price_move_pct: float
-    min_dif_lift_ratio: float
-    signal_cluster_gap: int
-
-
-SWING_CONFIG_BY_PERIOD: Dict[str, SwingConfig] = {
-    'm1': {
-        'swing_radius': 10,
-        'merge_within_bars': 5,
-        'dif_window': 5,
-        'min_price_move_pct': 0.001,
-        'min_dif_lift_ratio': 0.04,
-        'signal_cluster_gap': 18,
-    },
-    'time': {
-        'swing_radius': 10,
-        'merge_within_bars': 5,
-        'dif_window': 5,
-        'min_price_move_pct': 0.001,
-        'min_dif_lift_ratio': 0.04,
-        'signal_cluster_gap': 18,
-    },
-    'm5': {
-        'swing_radius': 8,
-        'merge_within_bars': 4,
-        'dif_window': 4,
-        'min_price_move_pct': 0.0012,
-        'min_dif_lift_ratio': 0.05,
-        'signal_cluster_gap': 15,
-    },
-    'm15': {
-        'swing_radius': 6,
-        'merge_within_bars': 3,
-        'dif_window': 4,
-        'min_price_move_pct': 0.0015,
-        'min_dif_lift_ratio': 0.06,
-        'signal_cluster_gap': 12,
-    },
-    'm30': {
-        'swing_radius': 5,
-        'merge_within_bars': 3,
-        'dif_window': 3,
-        'min_price_move_pct': 0.002,
-        'min_dif_lift_ratio': 0.06,
-        'signal_cluster_gap': 10,
-    },
-    'day': {
-        'swing_radius': 4,
-        'merge_within_bars': 2,
-        'dif_window': 3,
-        'min_price_move_pct': 0.003,
-        'min_dif_lift_ratio': 0.08,
-        'signal_cluster_gap': 8,
-    },
-    'week': {
-        'swing_radius': 3,
-        'merge_within_bars': 2,
-        'dif_window': 2,
-        'min_price_move_pct': 0.005,
-        'min_dif_lift_ratio': 0.1,
-        'signal_cluster_gap': 6,
-    },
-    'month': {
-        'swing_radius': 2,
-        'merge_within_bars': 1,
-        'dif_window': 2,
-        'min_price_move_pct': 0.008,
-        'min_dif_lift_ratio': 0.12,
-        'signal_cluster_gap': 4,
-    },
+TRADING_VIEW_RSI_DIVERGENCE_CONFIG: PivotConfig = {
+    'pivot_left': 5,
+    'pivot_right': 5,
+    'range_lower': 5,
+    'range_upper': 60,
 }
 
 
-def resolve_swing_config(period: str) -> SwingConfig:
-    key = str(period or '').strip().lower()
-    return SWING_CONFIG_BY_PERIOD.get(key, SWING_CONFIG_BY_PERIOD['m30'])
+def resolve_swing_config(period: str) -> PivotConfig:
+    _ = period
+    return dict(TRADING_VIEW_RSI_DIVERGENCE_CONFIG)
 
 
 def resolve_divergence_lookback(period: str) -> int:
-    return int(resolve_swing_config(period)['swing_radius'])
+    return int(resolve_swing_config(period)['pivot_right'])
 
 
 def calculate_macd_dif_series(
@@ -375,6 +310,54 @@ def _dedupe_signal_clusters(
     return result
 
 
+def _to_float_or_none(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric
+
+
+def _find_indicator_pivots(
+    values: Sequence[Any],
+    left: int,
+    right: int,
+    is_high: bool,
+) -> List[Dict[str, Any]]:
+    pivots: List[Dict[str, Any]] = []
+    length = len(values)
+    for i in range(left, length - right):
+        center = _to_float_or_none(values[i])
+        if center is None:
+            continue
+
+        is_pivot = True
+        for j in range(i - left, i + right + 1):
+            if j == i:
+                continue
+            other = _to_float_or_none(values[j])
+            if other is None:
+                is_pivot = False
+                break
+            if is_high and center <= other:
+                is_pivot = False
+                break
+            if not is_high and center >= other:
+                is_pivot = False
+                break
+
+        if is_pivot:
+            pivots.append({'index': i, 'value': center})
+    return pivots
+
+
+def _in_pivot_range(prev: Dict[str, Any], current: Dict[str, Any], config: PivotConfig) -> bool:
+    bars = int(current['index']) - int(prev['index'])
+    return int(config['range_lower']) <= bars <= int(config['range_upper'])
+
+
 def detect_divergence(
     price_rows: Sequence[Dict[str, Any]],
     indicator_values: Sequence[Any],
@@ -387,76 +370,71 @@ def detect_divergence(
     if bar_count == 0 or len(indicator_values) != bar_count:
         return {'top': top_divergence, 'bottom': bottom_divergence}
 
-    if isinstance(period_or_legacy_lookback, str):
-        config = resolve_swing_config(period_or_legacy_lookback)
-    else:
-        config = dict(resolve_swing_config('m30'))
-        config['swing_radius'] = max(2, int(period_or_legacy_lookback or config['swing_radius']))
+    config = resolve_swing_config(str(period_or_legacy_lookback or 'm30'))
+    if not isinstance(period_or_legacy_lookback, str):
+        legacy_lookback = max(1, int(period_or_legacy_lookback or config['pivot_right']))
+        config['pivot_left'] = legacy_lookback
+        config['pivot_right'] = legacy_lookback
 
-    swing_radius = int(config['swing_radius'])
-    merge_within = int(config['merge_within_bars'])
-    dif_window = int(config['dif_window'])
-    min_price_move_pct = float(config['min_price_move_pct'])
-    min_dif_lift_ratio = float(config['min_dif_lift_ratio'])
-    signal_cluster_gap = int(config['signal_cluster_gap'])
-
-    highs = [item.get('high', item.get('close')) for item in price_rows]
-    lows = [item.get('low', item.get('close')) for item in price_rows]
-
-    swing_highs = _merge_nearby_swings(
-        _find_swing_points(highs, swing_radius, is_high=True),
-        merge_within,
-        is_high=True,
-    )
-    swing_lows = _merge_nearby_swings(
-        _find_swing_points(lows, swing_radius, is_high=False),
-        merge_within,
+    pivot_lows = _find_indicator_pivots(
+        indicator_values,
+        int(config['pivot_left']),
+        int(config['pivot_right']),
         is_high=False,
     )
+    pivot_highs = _find_indicator_pivots(
+        indicator_values,
+        int(config['pivot_left']),
+        int(config['pivot_right']),
+        is_high=True,
+    )
 
-    for i in range(1, len(swing_highs)):
-        current = swing_highs[i]
-        prev = swing_highs[i - 1]
-        if prev['value'] <= 0:
-            continue
-        if (float(current['value']) - float(prev['value'])) / float(prev['value']) < min_price_move_pct:
-            continue
-
-        current_dif = _dif_at_swing(indicator_values, int(current['index']), dif_window, is_high=True)
-        prev_dif = _dif_at_swing(indicator_values, int(prev['index']), dif_window, is_high=True)
-        if current_dif is None or prev_dif is None:
-            continue
-        if not _dif_drop_enough(float(prev_dif), float(current_dif), min_dif_lift_ratio):
+    for i in range(1, len(pivot_lows)):
+        current = pivot_lows[i]
+        prev = pivot_lows[i - 1]
+        if not _in_pivot_range(prev, current, config):
             continue
 
-        top_divergence.append({
-            'index': current['index'],
-            'priceValue': current['value'],
-            'indicatorValue': current_dif,
-        })
-
-    for i in range(1, len(swing_lows)):
-        current = swing_lows[i]
-        prev = swing_lows[i - 1]
-        if prev['value'] <= 0:
-            continue
-        if (float(prev['value']) - float(current['value'])) / float(prev['value']) < min_price_move_pct:
+        current_row = price_rows[int(current['index'])]
+        prev_row = price_rows[int(prev['index'])]
+        current_low = _to_float_or_none(current_row.get('low', current_row.get('close')))
+        prev_low = _to_float_or_none(prev_row.get('low', prev_row.get('close')))
+        if current_low is None or prev_low is None:
             continue
 
-        current_dif = _dif_at_swing(indicator_values, int(current['index']), dif_window, is_high=False)
-        prev_dif = _dif_at_swing(indicator_values, int(prev['index']), dif_window, is_high=False)
-        if current_dif is None or prev_dif is None:
-            continue
-        if not _dif_lift_enough(float(prev_dif), float(current_dif), min_dif_lift_ratio):
+        price_lower_low = current_low < prev_low
+        indicator_higher_low = float(current['value']) > float(prev['value'])
+        if not price_lower_low or not indicator_higher_low:
             continue
 
         bottom_divergence.append({
             'index': current['index'],
-            'priceValue': current['value'],
-            'indicatorValue': current_dif,
+            'priceValue': current_low,
+            'indicatorValue': current['value'],
         })
 
-    return {
-        'top': _dedupe_signal_clusters(top_divergence, signal_cluster_gap, is_bottom=False),
-        'bottom': _dedupe_signal_clusters(bottom_divergence, signal_cluster_gap, is_bottom=True),
-    }
+    for i in range(1, len(pivot_highs)):
+        current = pivot_highs[i]
+        prev = pivot_highs[i - 1]
+        if not _in_pivot_range(prev, current, config):
+            continue
+
+        current_row = price_rows[int(current['index'])]
+        prev_row = price_rows[int(prev['index'])]
+        current_high = _to_float_or_none(current_row.get('high', current_row.get('close')))
+        prev_high = _to_float_or_none(prev_row.get('high', prev_row.get('close')))
+        if current_high is None or prev_high is None:
+            continue
+
+        price_higher_high = current_high > prev_high
+        indicator_lower_high = float(current['value']) < float(prev['value'])
+        if not price_higher_high or not indicator_lower_high:
+            continue
+
+        top_divergence.append({
+            'index': current['index'],
+            'priceValue': current_high,
+            'indicatorValue': current['value'],
+        })
+
+    return {'top': top_divergence, 'bottom': bottom_divergence}
