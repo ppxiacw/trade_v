@@ -119,8 +119,8 @@ if not exist "%FRONTEND_VITE_BIN%" (
 )
 
 if "%RESTART_MODE%"=="1" (
-  echo [INFO] Restart mode enabled. Closing existing backend/frontend windows...
-  call :stop_named_windows
+  echo [INFO] Restart mode enabled. Closing existing backend/frontend services...
+  call :stop_existing_services
   ping -n 2 127.0.0.1 >nul
 )
 
@@ -131,9 +131,8 @@ call :stop_port_listener 5174
 call :stop_port_listener 5175
 
 echo Starting backend...
-REM Use start /D + explicit executable/script paths to avoid cmd quoting edge-cases
-REM that may accidentally pass python.exe as a script argument.
-start "trade_v backend" /D "%BACKEND_DIR%" "%PYTHON_EXE%" "%BACKEND_DIR%\app.py"
+REM Keep backend in a cmd window with a stable title, so restart/stop can find it.
+start "trade_v backend" /D "%BACKEND_DIR%" cmd /k "title trade_v backend && call ""%PYTHON_EXE%"" ""%BACKEND_DIR%\app.py"""
 
 echo Starting frontend...
 start "trader_front frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && title trader_front frontend && npm run dev -- --port %FRONTEND_PORT% --strictPort"
@@ -147,8 +146,8 @@ echo [TIP] Use "%~nx0 restart" to close existing service windows before relaunch
 endlocal
 exit /b 0
 
-:stop_named_windows
-powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; $procs = Get-Process; foreach($p in $procs){ if($p.MainWindowTitle -like 'trade_v backend*' -or $p.MainWindowTitle -like 'trader_front frontend*'){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
+:stop_existing_services
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $ids = New-Object 'System.Collections.Generic.HashSet[int]'; foreach($port in @(5000,5173,5174,5175)){ Get-NetTCPConnection -State Listen -LocalPort $port | ForEach-Object { if($_.OwningProcess -gt 0){ [void]$ids.Add([int]$_.OwningProcess) } } }; Get-Process | Where-Object { $_.MainWindowTitle -like 'trade_v backend*' -or $_.MainWindowTitle -like 'trader_front frontend*' } | ForEach-Object { [void]$ids.Add([int]$_.Id) }; $backendDir = '%BACKEND_DIR%'.ToLower(); $frontendDir = '%FRONTEND_DIR%'.ToLower(); Get-CimInstance Win32_Process | Where-Object { $cmd = ([string]$_.CommandLine).ToLower(); $cmd.Contains($backendDir.ToLower()) -or ($cmd.Contains($frontendDir.ToLower()) -and $cmd -match 'npm|vite|node|cmd.exe') } | ForEach-Object { [void]$ids.Add([int]$_.ProcessId) }; foreach($id in $ids){ if($id -ne $PID){ Write-Host ('[INFO] Stopping PID ' + $id); Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
 exit /b 0
 
 :stop_port_listener

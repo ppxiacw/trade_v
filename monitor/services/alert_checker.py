@@ -996,6 +996,11 @@ class AlertChecker:
 
         return alerts
 
+    def _get_rsi_thresholds(self, window):
+        if int(window) == 30:
+            return 30, 70
+        return 20, 80
+
     def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6):
         """检查RSI边界条件"""
         # 取消 1 分钟 RSI 越界（<20 或 >80）告警，避免高频噪声。
@@ -1010,17 +1015,20 @@ class AlertChecker:
             self._rsi_trigger_states[state_key] = {'last_rsi_triggered': False}
 
         current_state = self._rsi_trigger_states[state_key]
+        low_threshold, high_threshold = self._get_rsi_thresholds(window)
 
-        if not 20 <= rsi_6 <= 80:
+        if not low_threshold <= rsi_6 <= high_threshold:
             # 取消 5 分钟周期 RSI 低位（<=20）告警，仅保留高位（>=80）告警。
-            if window == 5 and rsi_6 <= 20:
+            if window == 5 and rsi_6 <= low_threshold:
                 current_state['last_rsi_triggered'] = False
                 return None
-            is_consecutive_trigger = (pre_rsi_6 is not None and not 20 <= pre_rsi_6 <= 80)
+            is_consecutive_trigger = (
+                pre_rsi_6 is not None and not low_threshold <= pre_rsi_6 <= high_threshold
+            )
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 current_state['last_rsi_triggered'] = True
-                alert_type = '买点' if rsi_6 <= 20 else '卖点'
+                alert_type = '买点' if rsi_6 <= low_threshold else '卖点'
                 return self._create_alert_data(
                     stock,
                     f"({window}min)rsi_6:{rsi_6}",
@@ -1042,9 +1050,10 @@ class AlertChecker:
             return []
 
         alerts = []
+        low_threshold, high_threshold = self._get_rsi_thresholds(window)
 
         # RSI低位反弹模式
-        if window != 5 and pre_rsi_6 <= 20 and self._is_bullish_reversal(last_k, prev_k):
+        if window != 5 and pre_rsi_6 <= low_threshold and self._is_bullish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock,
                 f"({window}min)rsi_6_up",
@@ -1054,7 +1063,7 @@ class AlertChecker:
             ))
 
         # RSI高位回落模式
-        if pre_rsi_6 >= 80 and self._is_bearish_reversal(last_k, prev_k):
+        if pre_rsi_6 >= high_threshold and self._is_bearish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock,
                 f"({window}min)rsi_6_down",
@@ -1093,10 +1102,12 @@ class AlertChecker:
         if rsi_6 is None:
             return None
 
+        low_threshold, high_threshold = self._get_rsi_thresholds(window)
+
         # 阳包阴
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and
                 last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount'] and
-                rsi_6 < 20 and window != 5):
+                rsi_6 < low_threshold and window != 5):
             return self._create_alert_data(
                 stock,
                 f"({window}min)engulfing_up",
@@ -1108,7 +1119,7 @@ class AlertChecker:
         # 阴包阳
         elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and
               last_k['close'] < last_k['open'] and last_k['amount'] > prev_k['amount'] and
-              rsi_6 > 80):
+              rsi_6 > high_threshold):
             return self._create_alert_data(
                 stock,
                 f"({window}min)engulfing_down",

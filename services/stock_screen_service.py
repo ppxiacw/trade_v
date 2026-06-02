@@ -5,10 +5,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone, timedelta
@@ -81,6 +83,15 @@ _NOTICE_MAX_PAGES = 2
 _FUTURE_EVENT_CACHE: Dict[str, Dict[str, Any]] = {}
 _FUTURE_EVENT_ITEM_TTL_SECONDS = 60 * 60
 _FUTURE_EVENT_FETCH_MAX_WORKERS = 6
+_GTIMG_QUOTE_CACHE: Dict[str, Any] = {
+    "expire_at": 0.0,
+    "key": "",
+    "data": [],
+}
+_GTIMG_QUOTE_CACHE_LOCK = threading.Lock()
+_GTIMG_QUOTE_CACHE_TTL_SECONDS = int(os.getenv("GTIMG_QUOTE_CACHE_TTL_SECONDS", "20") or "20")
+_GTIMG_QUOTE_FETCH_MAX_WORKERS = int(os.getenv("GTIMG_QUOTE_FETCH_MAX_WORKERS", "6") or "6")
+_GTIMG_LAST_STATS: Dict[str, Any] = {}
 
 
 def _disable_proxy_for_requests() -> None:
@@ -121,6 +132,14 @@ def _safe_pct_float(x: Any) -> Optional[float]:
         normalized = x.strip().replace("%", "").replace(",", "")
         return _safe_float(normalized)
     return _safe_float(x)
+
+
+def _elapsed_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _mark_timing(timing: Dict[str, int], name: str, start: float) -> None:
+    timing[name] = _elapsed_ms(start)
 
 
 def ts_to_gtimg_symbol(ts_code: str) -> Optional[str]:
@@ -1303,8 +1322,10 @@ def _fetch_future_events_for_pure_code(pure_code: str) -> List[Dict[str, str]]:
 
 
 def load_future_events_by_stock_codes(stock_codes: List[str]) -> Tuple[Dict[str, List[Dict[str, str]]], dict]:
+    total_start = time.perf_counter()
+    timing: Dict[str, int] = {}
     if not stock_codes:
-        return {}, {"requested": 0, "filled_codes": 0, "total_events": 0}
+        return {}, {"requested": 0, "filled_codes": 0, "total_events": 0, "timing": {"total_ms": 0}}
 
     now = time.time()
     key_to_pure: Dict[str, str] = {}
@@ -1330,6 +1351,8 @@ def load_future_events_by_stock_codes(stock_codes: List[str]) -> Tuple[Dict[str,
         else:
             pending_pure_codes.append(pure_code)
 
+    cache_hits = len(pure_to_keys) - len(pending_pure_codes)
+    stage_start = time.perf_counter()
     if pending_pure_codes:
         max_workers = min(_FUTURE_EVENT_FETCH_MAX_WORKERS, max(1, len(pending_pure_codes)))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1349,6 +1372,7 @@ def load_future_events_by_stock_codes(stock_codes: List[str]) -> Tuple[Dict[str,
                     "updated_at": time.time(),
                     "events": list(events),
                 }
+    _mark_timing(timing, "fetch_missing_ms", stage_start)
 
     data: Dict[str, List[Dict[str, str]]] = {}
     filled_codes = 0
@@ -1362,12 +1386,16 @@ def load_future_events_by_stock_codes(stock_codes: List[str]) -> Tuple[Dict[str,
             data[key] = list(events)
 
     tz_cn = timezone(timedelta(hours=8))
+    timing["total_ms"] = _elapsed_ms(total_start)
     return data, {
         "requested": len(key_to_pure),
         "filled_codes": filled_codes,
         "total_events": total_events,
         "from_date": datetime.now(tz_cn).strftime("%Y-%m-%d"),
         "source": "Eastmoney stock calendar",
+        "cache_hits": cache_hits,
+        "cache_misses": len(pending_pure_codes),
+        "timing": timing,
     }
 
 
@@ -1462,57 +1490,102 @@ def _fetch_gtimg_symbols_once(session: requests.Session, symbols: List[str], tim
     return _parse_gtimg_response(text)
 
 
-def _fetch_gtimg_batches(symbols: List[str], batch_size: int = 80) -> List[dict]:
-    _disable_proxy_for_requests()
-    all_rows: List[dict] = []
+def _gtimg_cache_key(symbols: List[str]) -> str:
+    digest = hashlib.sha1(",".join(symbols).encode("utf-8")).hexdigest()
+    return f"{len(symbols)}:{digest}"
+
+
+def _fetch_gtimg_batch_with_retry(batch: List[str]) -> Tuple[List[dict], Dict[str, Any]]:
     session = requests.Session()
     session.trust_env = False
+    last_err: Optional[Exception] = None
+    start = time.perf_counter()
+    for attempt in range(3):
+        try:
+            rows = _fetch_gtimg_symbols_once(session, batch, timeout=12) or []
+            return rows, {
+                "ok": True,
+                "attempts": attempt + 1,
+                "elapsed_ms": _elapsed_ms(start),
+                "size": len(batch),
+            }
+        except Exception as e:
+            last_err = e
+            time.sleep(0.25 * (2**attempt))
 
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i : i + batch_size]
-        url = "https://qt.gtimg.cn/q=" + ",".join(batch)
-        last_err: Optional[Exception] = None
-        for attempt in range(4):
-            try:
-                all_rows.extend(_fetch_gtimg_symbols_once(session, batch, timeout=25) or [])
-                break
-            except Exception as e:
-                last_err = e
-                time.sleep(0.6 * (2**attempt) + 0.1)
-        else:
-            logger.warning("腾讯行情批次失败 symbols=%s.. err=%s", batch[:3], last_err)
-            # 降级补拉：按小批次甚至单票兜底，避免整批缺失导致筛选漏票。
-            for j in range(0, len(batch), 10):
-                mini = batch[j : j + 10]
-                mini_ok = False
-                for mini_attempt in range(3):
-                    try:
-                        all_rows.extend(_fetch_gtimg_symbols_once(session, mini, timeout=15) or [])
-                        mini_ok = True
-                        break
-                    except Exception:
-                        time.sleep(0.35 * (mini_attempt + 1))
-                if mini_ok:
-                    continue
-                for sym in mini:
-                    single_ok = False
-                    for single_attempt in range(2):
-                        try:
-                            all_rows.extend(_fetch_gtimg_symbols_once(session, [sym], timeout=12) or [])
-                            single_ok = True
-                            break
-                        except Exception:
-                            time.sleep(0.25 * (single_attempt + 1))
-                    if not single_ok:
-                        logger.warning("腾讯行情单票兜底失败 symbol=%s", sym)
-        time.sleep(0.06)
+    logger.warning("腾讯行情批次失败 symbols=%s.. err=%s", batch[:3], last_err)
+    fallback_rows: List[dict] = []
+    fallback_failures = 0
+    for j in range(0, len(batch), 10):
+        mini = batch[j : j + 10]
+        try:
+            fallback_rows.extend(_fetch_gtimg_symbols_once(session, mini, timeout=8) or [])
+        except Exception as e:
+            fallback_failures += 1
+            logger.warning("腾讯行情小批次兜底失败 symbols=%s.. err=%s", mini[:3], e)
+    return fallback_rows, {
+        "ok": False,
+        "attempts": 3,
+        "elapsed_ms": _elapsed_ms(start),
+        "size": len(batch),
+        "fallback_failures": fallback_failures,
+    }
+
+
+def _fetch_gtimg_batches(symbols: List[str], batch_size: int = 80) -> List[dict]:
+    _disable_proxy_for_requests()
+    global _GTIMG_LAST_STATS
+    started = time.perf_counter()
+    key = _gtimg_cache_key(symbols)
+    now = time.time()
+    with _GTIMG_QUOTE_CACHE_LOCK:
+        cached_key = str(_GTIMG_QUOTE_CACHE.get("key") or "")
+        expire_at = float(_GTIMG_QUOTE_CACHE.get("expire_at") or 0)
+        cached_rows = _GTIMG_QUOTE_CACHE.get("data")
+        if key == cached_key and now < expire_at and isinstance(cached_rows, list):
+            _GTIMG_LAST_STATS = {
+                "cache_hit": True,
+                "requested": len(symbols),
+                "parsed": len(cached_rows),
+                "elapsed_ms": _elapsed_ms(started),
+            }
+            return list(cached_rows)
+
+    batches = [symbols[i : i + batch_size] for i in range(0, len(symbols), batch_size)]
+    all_rows: List[dict] = []
+    batch_stats: List[Dict[str, Any]] = []
+    max_workers = min(max(1, _GTIMG_QUOTE_FETCH_MAX_WORKERS), max(1, len(batches)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_batch = {executor.submit(_fetch_gtimg_batch_with_retry, batch): batch for batch in batches}
+        for future in as_completed(future_to_batch):
+            rows, stats = future.result()
+            all_rows.extend(rows)
+            batch_stats.append(stats)
+
     dedup: Dict[str, dict] = {}
     for item in all_rows:
         sym = str(item.get("gtimg_symbol") or "").strip().lower()
         if not sym:
             continue
         dedup[sym] = item
-    return list(dedup.values())
+    rows = list(dedup.values())
+    failures = sum(1 for item in batch_stats if not item.get("ok"))
+    _GTIMG_LAST_STATS = {
+        "cache_hit": False,
+        "requested": len(symbols),
+        "parsed": len(rows),
+        "batch_count": len(batches),
+        "batch_failures": failures,
+        "max_workers": max_workers,
+        "elapsed_ms": _elapsed_ms(started),
+    }
+    logger.info("腾讯行情拉取完成 stats=%s", _GTIMG_LAST_STATS)
+    if rows:
+        with _GTIMG_QUOTE_CACHE_LOCK:
+            _GTIMG_QUOTE_CACHE["key"] = key
+            _GTIMG_QUOTE_CACHE["data"] = rows
+            _GTIMG_QUOTE_CACHE["expire_at"] = time.time() + max(0, _GTIMG_QUOTE_CACHE_TTL_SECONDS)
+    return rows
 
 
 def _parse_trade_date_input(trade_date: Optional[str]) -> Optional[date]:
@@ -1806,13 +1879,18 @@ def screen_stocks_by_mv_and_pct(
     trade_date: Optional[str] = None,
     lookback_days: int = 0,
     min_price: float = 0.0,
+    include_profile: bool = True,
+    include_theme_trend: bool = True,
 ) -> Tuple[List[dict], dict]:
+    total_start = time.perf_counter()
+    timing: Dict[str, int] = {}
     requested_trade_date = _parse_trade_date_input(trade_date)
     effective_trade_date = None
     daily_snapshot_map: Dict[str, dict] = {}
     sym_to_meta: Dict[str, Tuple[str, str]] = {}
     symbols: List[str] = []
 
+    stage_start = time.perf_counter()
     if requested_trade_date is None:
         universe = _load_universe()
         if not universe:
@@ -1863,13 +1941,18 @@ def screen_stocks_by_mv_and_pct(
             raise RuntimeError(
                 f"历史日期筛选失败：{effective_trade_date.isoformat()} 未找到可用股票代码。"
             )
+    _mark_timing(timing, "universe_ms", stage_start)
 
-    em_profile_map = _load_em_profile_map()
+    stage_start = time.perf_counter()
+    em_profile_map = _load_em_profile_map() if include_profile else {}
+    _mark_timing(timing, "em_profile_ms", stage_start)
 
     tz_cn = timezone(timedelta(hours=8))
     fetched_at = datetime.now(tz_cn).isoformat(timespec="seconds")
 
+    stage_start = time.perf_counter()
     quotes = _fetch_gtimg_batches(symbols)
+    _mark_timing(timing, "gtimg_quotes_ms", stage_start)
     if not quotes:
         raise RuntimeError("腾讯行情接口未返回有效数据，请检查网络或稍后重试。")
 
@@ -1886,6 +1969,7 @@ def screen_stocks_by_mv_and_pct(
     pullback_follow_trade_dates: List[date] = []
     pullback_series_map: Dict[str, Dict[date, dict]] = {}
 
+    stage_start = time.perf_counter()
     if pullback_filter_enabled:
         pullback_base_trade_date = effective_trade_date or _resolve_latest_trade_date()
         if pullback_base_trade_date is None:
@@ -1913,7 +1997,9 @@ def screen_stocks_by_mv_and_pct(
         pullback_series_map = _load_daily_series_by_trade_dates(
             [pullback_anchor_trade_date, *pullback_follow_trade_dates]
         )
+    _mark_timing(timing, "pullback_prepare_ms", stage_start)
 
+    stage_start = time.perf_counter()
     matched_quote_symbols: set[str] = set()
     for q in quotes:
         gsym = q.get("gtimg_symbol")
@@ -2044,6 +2130,7 @@ def screen_stocks_by_mv_and_pct(
             }
         )
         row_ts_codes.append(ts_code)
+    _mark_timing(timing, "filter_rows_ms", stage_start)
 
     sorted_pairs = sorted(zip(rows, row_ts_codes), key=lambda pair: (pair[0].get("pct_chg") or 0), reverse=True)
     rows = [p[0] for p in sorted_pairs]
@@ -2063,9 +2150,10 @@ def screen_stocks_by_mv_and_pct(
         for row, ts_code in zip(rows, row_ts_codes)
         if not row.get("board") or not row.get("concept")
     ]
+    stage_start = time.perf_counter()
     if missing_ts_codes:
         unique_missing_ts_codes = list(dict.fromkeys(missing_ts_codes))
-        ths_profile_map = _load_ths_profile_map(unique_missing_ts_codes)
+        ths_profile_map = _load_ths_profile_map(unique_missing_ts_codes) if include_profile else {}
         for row, ts_code in zip(rows, row_ts_codes):
             profile = ths_profile_map.get(ts_code) or {}
             board_before = row.get("board")
@@ -2076,8 +2164,16 @@ def screen_stocks_by_mv_and_pct(
                 row["concept"] = profile.get("concept")
             if ((not board_before and row.get("board")) or (not concept_before and row.get("concept"))):
                 ths_fallback_filled += 1
+    _mark_timing(timing, "ths_profile_ms", stage_start)
 
-    ths_theme_trend_stats = _enrich_rows_with_ths_theme_trend(rows)
+    stage_start = time.perf_counter()
+    ths_theme_trend_stats = (
+        _enrich_rows_with_ths_theme_trend(rows)
+        if include_theme_trend
+        else {"enabled": False, "board_matched": 0, "concept_matched": 0, "fetched_at": "", "source": ""}
+    )
+    _mark_timing(timing, "theme_trend_ms", stage_start)
+    timing["total_ms"] = _elapsed_ms(total_start)
 
     meta: Dict[str, Any] = {
         "fetched_at": fetched_at,
@@ -2097,6 +2193,8 @@ def screen_stocks_by_mv_and_pct(
         "ths_theme_source": ths_theme_trend_stats.get("source") or "",
         "exclude_star_board": True,
         "exclude_note": "已排除科创板（代码 688 开头）",
+        "timing": timing,
+        "quote_fetch": dict(_GTIMG_LAST_STATS),
     }
     if pullback_filter_enabled:
         meta.update(

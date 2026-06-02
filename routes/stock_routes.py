@@ -99,6 +99,8 @@ def screen_mv_pct():
         limit = request.args.get('limit', default=3000, type=int)
         trade_date = (request.args.get('trade_date', default='', type=str) or '').strip()
         lookback_days = request.args.get('lookback_days', default=0, type=int)
+        include_profile = (request.args.get('include_profile', default='1', type=str) or '1').lower() not in ('0', 'false', 'no')
+        include_theme_trend = (request.args.get('include_theme_trend', default='1', type=str) or '1').lower() not in ('0', 'false', 'no')
 
         if min_mv_yi < 0:
             return jsonify({'success': False, 'message': 'min_mv_yi 不能为负数'}), 400
@@ -116,6 +118,14 @@ def screen_mv_pct():
             trade_date=trade_date or None,
             lookback_days=lookback_days,
             min_price=min_price,
+            include_profile=include_profile,
+            include_theme_trend=include_theme_trend,
+        )
+        _logger.info(
+            "screen_mv_pct success count=%s timing=%s quote_fetch=%s",
+            len(data),
+            (meta or {}).get('timing'),
+            (meta or {}).get('quote_fetch'),
         )
         return jsonify({
             'success': True,
@@ -129,6 +139,8 @@ def screen_mv_pct():
                 'limit': limit,
                 'trade_date': trade_date or None,
                 'lookback_days': lookback_days,
+                'include_profile': include_profile,
+                'include_theme_trend': include_theme_trend,
             },
         })
     except ValueError as e:
@@ -224,6 +236,12 @@ def screen_future_events():
             return jsonify({'success': False, 'message': '单次最多请求 200 只股票'}), 400
 
         data, meta = load_future_events_by_stock_codes(stock_codes)
+        _logger.info(
+            "screen_future_events success requested=%s filled=%s timing=%s",
+            (meta or {}).get('requested'),
+            (meta or {}).get('filled_codes'),
+            (meta or {}).get('timing'),
+        )
         return jsonify({
             'success': True,
             'data': data,
