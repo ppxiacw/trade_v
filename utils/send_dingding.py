@@ -16,7 +16,6 @@ common = os.getenv('DINGTALK_WEBHOOK_COMMON', _DEFAULT_COMMON_WEBHOOK_URL)
 
 # 监控周期 -> 新浪缩略图 k_type
 _ALERT_PERIOD_TO_SINA_KTYPE = {
-    'm1': ('mink1', '1分钟'),
     'm5': ('mink5', '5分钟'),
     'm15': ('mink15', '15分钟'),
     'm30': ('mink30', '30分钟'),
@@ -34,6 +33,8 @@ def resolve_dingtalk_chart_types(chart_period=None):
     有明确周期时：主图=对应 K 线，辅图=分时；否则：分时 + 日 K。
     """
     period = str(chart_period or '').strip().lower()
+    if period == 'm1':
+        return ('min', '1分钟分时'), _DEFAULT_CHART_SECONDARY
     if period in _ALERT_PERIOD_TO_SINA_KTYPE:
         primary = _ALERT_PERIOD_TO_SINA_KTYPE[period]
         return primary, _DEFAULT_CHART_PRIMARY
@@ -99,4 +100,4 @@ def generate_stock_image_url(stock_code: str, k_type='min') -> str:
 
     code_part, exchange_part = stock_code.upper().split('.')
     sina_code = f"{exchange_part.lower()}{code_part}"
-    return f"http://image.sinajs.cn/newchart/{k_type}/n/{sina_code}.gif?t={random.randint(0, 99999)}"
+    return f"https://image.sinajs.cn/newchart/{k_type}/n/{sina_code}.gif?t={random.randint(0, 99999)}"

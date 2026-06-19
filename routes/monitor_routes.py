@@ -15,6 +15,20 @@ from monitor.config.stock_code import normalize_monitor_stock_code
 from runtime_state import get_alert_checker, get_alert_sender, get_config, get_stock_data
 from utils.gtimg_quote import attach_intraday_quotes_to_stocks
 from utils.divergence_service import compute_divergence_points
+from monitor.config.alert_monitor_config import (
+    DEFAULT_RSI_ALERT_CONFIG,
+    DEFAULT_STOCK_ALERT_TEMPLATE,
+    normalize_rsi_alert_config,
+    parse_rsi_alert_config_from_storage,
+    rsi_alert_config_to_storage_text,
+)
+from monitor.config.market_calendar import (
+    get_trade_calendar_year,
+    get_latest_trading_day,
+    invalidate_calendar_cache,
+    is_trading_day,
+)
+from monitor.config.market_time import now_in_market_tz
 
 _INTRADAY_QUOTE_FIELDS = ('pct_chg', 'price')
 
@@ -135,6 +149,10 @@ def _parse_periods_from_storage(raw_value):
     return list(_DIVERGENCE_DEFAULT_PERIODS)
 
 
+def _apply_rsi_defaults_to_stock(stock):
+    stock['rsi_alert_config'] = parse_rsi_alert_config_from_storage(stock.get('rsi_alert_config'))
+
+
 def _apply_divergence_defaults_to_stock(stock):
     stock['divergence_enabled'] = 1 if _to_bool(stock.get('divergence_enabled'), False) else 0
     stock['divergence_macd_enabled'] = 1 if _to_bool(stock.get('divergence_macd_enabled'), True) else 0
@@ -162,29 +180,43 @@ def _apply_divergence_defaults_to_stock(stock):
 
 def _build_divergence_patch_from_payload(data):
     patch = {}
+    explicit_alert_fields = {
+        'common', 'divergence_enabled', 'divergence_macd_enabled',
+        'divergence_top_enabled', 'divergence_bottom_enabled',
+        'divergence_periods', 'divergence_scan_interval_seconds',
+        'divergence_kline_count', 'divergence_lookback', 'rsi_alert_config',
+    }
+    has_explicit_alert_fields = any(key in data for key in explicit_alert_fields)
+
     if 'point_monitor_mode' in data:
         mode = _normalize_point_monitor_mode(data.get('point_monitor_mode'), 'both')
         patch['point_monitor_mode'] = mode
         enabled = 0 if mode == 'off' else 1
         patch['point_monitor_enabled'] = enabled
-        patch['common'] = enabled
-        patch['normal_movement'] = 0
-        patch['divergence_enabled'] = enabled
-        patch['divergence_macd_enabled'] = 1
-        patch['divergence_rsi_enabled'] = 0
-        patch['divergence_top_enabled'] = 1
-        patch['divergence_bottom_enabled'] = 1
-    if 'point_monitor_enabled' in data:
+        if not has_explicit_alert_fields:
+            patch['common'] = enabled
+            patch['normal_movement'] = 0
+            patch['divergence_enabled'] = enabled
+            patch['divergence_macd_enabled'] = 1
+            patch['divergence_rsi_enabled'] = 0
+            patch['divergence_top_enabled'] = 1
+            patch['divergence_bottom_enabled'] = 1
+    if 'point_monitor_enabled' in data and 'point_monitor_mode' not in data:
         enabled = 1 if _to_bool(data.get('point_monitor_enabled')) else 0
         patch['point_monitor_enabled'] = enabled
         patch['point_monitor_mode'] = 'both' if enabled else 'off'
-        patch['common'] = enabled
-        patch['normal_movement'] = 0
-        patch['divergence_enabled'] = enabled
-        patch['divergence_macd_enabled'] = 1
-        patch['divergence_rsi_enabled'] = 0
-        patch['divergence_top_enabled'] = 1
-        patch['divergence_bottom_enabled'] = 1
+        if not has_explicit_alert_fields:
+            patch['common'] = enabled
+            patch['normal_movement'] = 0
+            patch['divergence_enabled'] = enabled
+            patch['divergence_macd_enabled'] = 1
+            patch['divergence_rsi_enabled'] = 0
+            patch['divergence_top_enabled'] = 1
+            patch['divergence_bottom_enabled'] = 1
+    if 'common' in data:
+        patch['common'] = 1 if _to_bool(data.get('common')) else 0
+    if 'normal_movement' in data:
+        patch['normal_movement'] = 1 if _to_bool(data.get('normal_movement')) else 0
     if 'divergence_enabled' in data:
         patch['divergence_enabled'] = 1 if _to_bool(data.get('divergence_enabled')) else 0
     if 'divergence_macd_enabled' in data:
@@ -206,6 +238,8 @@ def _build_divergence_patch_from_payload(data):
     if 'divergence_lookback' in data:
         value = _to_int_or_none(data.get('divergence_lookback'))
         patch['divergence_lookback'] = max(2, value) if value is not None else None
+    if 'rsi_alert_config' in data:
+        patch['rsi_alert_config'] = rsi_alert_config_to_storage_text(data.get('rsi_alert_config'))
     return patch
 
 
@@ -553,6 +587,7 @@ def _ensure_monitor_stock_columns_once():
                     'divergence_rsi_enabled': "ALTER TABLE stocks ADD COLUMN divergence_rsi_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用RSI背离'",
                     'divergence_top_enabled': "ALTER TABLE stocks ADD COLUMN divergence_top_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用顶背离'",
                     'divergence_bottom_enabled': "ALTER TABLE stocks ADD COLUMN divergence_bottom_enabled TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用底背离'",
+                    'rsi_alert_config': "ALTER TABLE stocks ADD COLUMN rsi_alert_config TEXT NULL COMMENT 'RSI周期告警配置(JSON)'",
                 }
 
                 for column_name, alter_sql in expected_columns.items():
@@ -694,6 +729,7 @@ def get_monitor_stocks():
             stock['trigger_max_price'] = stock.get('trigger_max_price')
             stock['sort_order'] = int(stock.get('sort_order') or 0)
             _apply_divergence_defaults_to_stock(stock)
+            _apply_rsi_defaults_to_stock(stock)
         
         payload = {
             'success': True,
@@ -1008,6 +1044,7 @@ def _find_monitor_stock_row(stock_code):
         return None
     row = rows[0]
     _apply_divergence_defaults_to_stock(row)
+    _apply_rsi_defaults_to_stock(row)
     return row
 
 
@@ -1072,6 +1109,64 @@ def get_divergence_detect():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@monitor_bp.route('/trade-calendar', methods=['GET'])
+def get_trade_calendar():
+    """获取 A 股交易日历（含节假日休市）。"""
+    try:
+        year = request.args.get('year')
+        if year is None:
+            year = now_in_market_tz().year
+        else:
+            year = int(year)
+        holidays_only = _to_bool(request.args.get('holidays_only'), False)
+
+        rows = get_trade_calendar_year(year)
+        if holidays_only:
+            rows = [
+                item for item in rows
+                if not item.get('is_trading_day') and int(item.get('weekday', 0)) < 5
+            ]
+
+        today = now_in_market_tz().strftime('%Y-%m-%d')
+        return jsonify({
+            'success': True,
+            'data': rows,
+            'year': year,
+            'total': len(rows),
+            'today': today,
+            'today_is_trading_day': is_trading_day(today),
+            'latest_trading_day': get_latest_trading_day(today),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/trade-calendar/latest-trading-day', methods=['GET'])
+def get_latest_trading_day_api():
+    """获取最近一个交易日（用于告警历史默认筛选）。"""
+    try:
+        today = now_in_market_tz().strftime('%Y-%m-%d')
+        latest = get_latest_trading_day(today)
+        return jsonify({
+            'success': True,
+            'today': today,
+            'today_is_trading_day': is_trading_day(today),
+            'latest_trading_day': latest,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/trade-calendar/reload', methods=['POST'])
+def reload_trade_calendar():
+    """刷新交易日历缓存。"""
+    try:
+        invalidate_calendar_cache()
+        return jsonify({'success': True, 'message': '交易日历缓存已刷新'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @monitor_bp.route('/settings/divergence', methods=['GET'])
 def get_divergence_settings():
     """获取后端背离监控运行配置。"""
@@ -1081,6 +1176,54 @@ def get_divergence_settings():
         return jsonify({
             'success': True,
             'data': config,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/settings/alert-monitor', methods=['GET'])
+def get_alert_monitor_settings():
+    """获取全局告警默认配置（背离 + RSI）。"""
+    try:
+        checker = get_alert_checker()
+        return jsonify({
+            'success': True,
+            'data': {
+                **checker.get_alert_monitor_settings(),
+                'stock_template': DEFAULT_STOCK_ALERT_TEMPLATE,
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/settings/alert-monitor', methods=['PUT'])
+def update_alert_monitor_settings():
+    """更新全局告警默认配置（立即生效并持久化）。"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        divergence_payload = payload.get('divergence')
+        rsi_payload = payload.get('rsi')
+
+        if divergence_payload:
+            for key in ('scan_interval_seconds', 'kline_count', 'lookback'):
+                if divergence_payload.get(key) is not None:
+                    try:
+                        divergence_payload[key] = int(divergence_payload[key])
+                    except (TypeError, ValueError):
+                        return jsonify({'success': False, 'message': f'{key} 格式错误'}), 400
+
+        checker = get_alert_checker()
+        checker.update_alert_monitor_settings(
+            divergence=divergence_payload,
+            rsi=rsi_payload,
+            persist=True,
+            reset_divergence_state=True,
+        )
+        return jsonify({
+            'success': True,
+            'message': '全局告警配置已更新并立即生效',
+            'data': checker.get_alert_monitor_settings(),
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

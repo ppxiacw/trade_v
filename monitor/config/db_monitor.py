@@ -353,8 +353,38 @@ class StockAlertDAO:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
+    def has_duplicate_alert(
+        self,
+        stock_code: str,
+        alert_message: str,
+        trigger_time: Any,
+    ) -> bool:
+        """同一股票、同一消息、同一触发时间视为重复告警。"""
+        if not stock_code or not alert_message or trigger_time is None:
+            return False
+        rows = self.db.execute_query(
+            """
+            SELECT id FROM stock_alert_log
+            WHERE stock_code = %s AND alert_message = %s AND trigger_time = %s
+            LIMIT 1
+            """,
+            (stock_code, alert_message, trigger_time),
+        )
+        return bool(rows)
+
     def insert_alert(self, alert_data: Dict[str, Any]) -> Optional[int]:
-        """插入股票告警记录"""
+        """插入股票告警记录；重复记录跳过并返回 None。"""
+        stock_code = alert_data.get('stock_code')
+        alert_message = alert_data.get('alert_message')
+        trigger_time = alert_data.get('trigger_time')
+        if self.has_duplicate_alert(stock_code, alert_message, trigger_time):
+            logger.info(
+                "跳过重复告警: stock=%s trigger_time=%s message=%s",
+                stock_code,
+                trigger_time,
+                alert_message,
+            )
+            return None
         return self.db.execute_insert('stock_alert_log', alert_data)
 
     def get_alerts_by_stock(self, stock_code: str, limit: int = 100) -> List[Dict[str, Any]]:

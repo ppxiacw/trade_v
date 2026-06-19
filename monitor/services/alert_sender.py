@@ -1,14 +1,19 @@
-from datetime import time as dt_time
+import logging
+import threading
 from utils.send_dingding import send_dingtalk_message
 from utils.GetStockData import get_stock_name
 from monitor.config.db_monitor import stock_alert_dao
+from monitor.config.market_calendar import is_alert_time_allowed
 from monitor.config.market_time import now_in_market_tz
+
+_logger = logging.getLogger(__name__)
 
 
 class AlertSender:
     def __init__(self, config):
         self.config = config
         self.last_alert_time = {}
+        self._send_lock = threading.Lock()
 
         for stock in self.config.MONITOR_STOCKS.keys():
             self.last_alert_time[stock] = {}
@@ -38,7 +43,8 @@ class AlertSender:
             last_trigger = stock_alert_state.get(alert_message)
 
             # 判断是否已经过了冷却时间
-            if not last_trigger or (current_time - last_trigger).seconds >= cooldown:
+            elapsed = (current_time - last_trigger).total_seconds() if last_trigger else cooldown
+            if not last_trigger or elapsed >= cooldown:
                 valid_alerts.append(alert_data)
                 stock_alert_state[alert_message] = current_time
 
@@ -54,26 +60,28 @@ class AlertSender:
             if 'stock_code' not in alert_data:
                 alert_data['stock_code'] = stock
 
-            # 构建显示消息
-            alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {alert_data['trigger_time']}"
-            chart_period = alert_data.pop('chart_period', None)
+            with self._send_lock:
+                if stock_alert_dao.has_duplicate_alert(
+                    alert_data['stock_code'],
+                    alert_data['alert_message'],
+                    alert_data['trigger_time'],
+                ):
+                    _logger.info(
+                        "跳过重复告警推送: stock=%s trigger_time=%s",
+                        alert_data['stock_code'],
+                        alert_data['trigger_time'],
+                    )
+                    continue
 
-            send_dingtalk_message(alert_info, stock, chart_period=chart_period)
+                # 构建显示消息
+                alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {alert_data['trigger_time']}"
+                chart_period = alert_data.pop('chart_period', None)
 
-            stock_alert_dao.insert_alert(alert_data)
+                send_dingtalk_message(alert_info, stock, chart_period=chart_period)
+
+                stock_alert_dao.insert_alert(alert_data)
 
     def _is_alert_time_allowed(self):
-        """
-        仅在连续竞价时段触发并入库：
-        - 上午: 09:30 <= t < 11:30
-        - 下午: 13:00 <= t < 15:00
-        收盘时刻与休市时间不触发。
-        """
-        now = now_in_market_tz()
-        if now.weekday() >= 5:
-            return False
-        t = dt_time(now.hour, now.minute, now.second)
-        morning = dt_time(9, 30) <= t < dt_time(11, 30)
-        afternoon = dt_time(13, 0) <= t < dt_time(15, 0)
-        return morning or afternoon
+        """仅在交易日连续竞价时段触发并入库。"""
+        return is_alert_time_allowed()
 

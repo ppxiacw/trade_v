@@ -1,21 +1,6 @@
 @echo off
 setlocal EnableExtensions
 
-set "RESTART_MODE=0"
-if not "%~1"=="" (
-  if /I "%~1"=="restart" (
-    set "RESTART_MODE=1"
-  ) else if /I "%~1"=="-r" (
-    set "RESTART_MODE=1"
-  ) else if /I "%~1"=="--restart" (
-    set "RESTART_MODE=1"
-  ) else (
-    echo [ERROR] Unknown argument: %~1
-    echo Usage: %~nx0 [restart ^| -r ^| --restart]
-    exit /b 1
-  )
-)
-
 REM Script location (backend repo: trade_v)
 set "BACKEND_DIR=%~dp0"
 if "%BACKEND_DIR:~-1%"=="\" set "BACKEND_DIR=%BACKEND_DIR:~0,-1%"
@@ -118,21 +103,17 @@ if not exist "%FRONTEND_VITE_BIN%" (
   )
 )
 
-if "%RESTART_MODE%"=="1" (
-  echo [INFO] Restart mode enabled. Closing existing backend/frontend services...
-  call :stop_existing_services
-  ping -n 2 127.0.0.1 >nul
-)
-
-echo [INFO] Cleaning previous local dev servers...
+echo [INFO] Checking and stopping existing backend/frontend services...
+call :stop_existing_services
+ping -n 2 127.0.0.1 >nul
 call :stop_port_listener 5000
 call :stop_port_listener 5173
 call :stop_port_listener 5174
 call :stop_port_listener 5175
 
 echo Starting backend...
-REM Keep backend in a cmd window with a stable title, so restart/stop can find it.
-start "trade_v backend" /D "%BACKEND_DIR%" cmd /k "title trade_v backend && call ""%PYTHON_EXE%"" ""%BACKEND_DIR%\app.py"""
+REM 使用独立 bat 启动，避免 cmd /k 嵌套引号在中文路径下解析错误
+start "trade_v backend" /D "%BACKEND_DIR%" cmd /k call "%BACKEND_DIR%\start_backend.bat"
 
 echo Starting frontend...
 start "trader_front frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && title trader_front frontend && npm run dev -- --port %FRONTEND_PORT% --strictPort"
@@ -140,14 +121,27 @@ start "trader_front frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && title trader_f
 echo Done. Two windows opened:
 echo - Backend:  http://127.0.0.1:5000
 echo - Frontend: http://127.0.0.1:%FRONTEND_PORT%
-echo [TIP] Script always clears listeners on ports 5000/5173-5175.
-echo [TIP] Use "%~nx0 restart" to close existing service windows before relaunch.
+echo [TIP] Script auto-clears listeners on ports 5000/5173-5175 before launch.
 
 endlocal
 exit /b 0
 
 :stop_existing_services
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $ids = New-Object 'System.Collections.Generic.HashSet[int]'; foreach($port in @(5000,5173,5174,5175)){ Get-NetTCPConnection -State Listen -LocalPort $port | ForEach-Object { if($_.OwningProcess -gt 0){ [void]$ids.Add([int]$_.OwningProcess) } } }; Get-Process | Where-Object { $_.MainWindowTitle -like 'trade_v backend*' -or $_.MainWindowTitle -like 'trader_front frontend*' } | ForEach-Object { [void]$ids.Add([int]$_.Id) }; $backendDir = '%BACKEND_DIR%'.ToLower(); $frontendDir = '%FRONTEND_DIR%'.ToLower(); Get-CimInstance Win32_Process | Where-Object { $cmd = ([string]$_.CommandLine).ToLower(); $cmd.Contains($backendDir.ToLower()) -or ($cmd.Contains($frontendDir.ToLower()) -and $cmd -match 'npm|vite|node|cmd.exe') } | ForEach-Object { [void]$ids.Add([int]$_.ProcessId) }; foreach($id in $ids){ if($id -ne $PID){ Write-Host ('[INFO] Stopping PID ' + $id); Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }" >nul 2>nul
+REM 仅按端口/窗口标题清理，避免误杀当前正在执行本脚本的 cmd（命令行也含 trade_v 路径）
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='SilentlyContinue';" ^
+  "$ids = New-Object 'System.Collections.Generic.HashSet[int]';" ^
+  "foreach($port in @(5000,5173,5174,5175)){" ^
+  "  Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object {" ^
+  "    if($_.OwningProcess -gt 0){ [void]$ids.Add([int]$_.OwningProcess) }" ^
+  "  }" ^
+  "};" ^
+  "Get-Process -ErrorAction SilentlyContinue | Where-Object {" ^
+  "  $_.MainWindowTitle -like 'trade_v backend*' -or $_.MainWindowTitle -like 'trader_front frontend*'" ^
+  "} | ForEach-Object { [void]$ids.Add([int]$_.Id) };" ^
+  "$self = $PID;" ^
+  "try { $parent = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $self)).ParentProcessId; if($parent){ [void]$ids.Remove($parent) } } catch {};" ^
+  "foreach($id in $ids){ if($id -ne $self){ Write-Host ('[INFO] Stopping PID ' + $id); Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } }"
 exit /b 0
 
 :stop_port_listener

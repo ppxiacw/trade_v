@@ -20,6 +20,13 @@ from utils.kline_forward_adjust import (
 )
 from utils.divergence_service import fetch_kline_rows
 from monitor.config.db_monitor import db_manager
+from monitor.config.alert_monitor_config import (
+    DEFAULT_RSI_ALERT_CONFIG,
+    classify_rsi_message_side,
+    get_enabled_rsi_windows,
+    get_rsi_period_config,
+    normalize_rsi_alert_config,
+)
 
 _logger = logging.getLogger(__name__)
 _DIVERGENCE_PERIOD_WINDOW_SECONDS = {
@@ -51,6 +58,7 @@ _DIVERGENCE_RECENT_BAR_LIMIT = {
 }
 _RUNTIME_SETTING_TABLE = 'monitor_runtime_settings'
 _DIVERGENCE_SETTING_KEY = 'divergence_monitor_config'
+_RSI_SETTING_KEY = 'rsi_alert_config'
 
 
 class AlertChecker:
@@ -69,7 +77,9 @@ class AlertChecker:
         self._divergence_last_scan_at = {}
         self._divergence_last_signal = {}
         self._divergence_bootstrapped = set()
+        self._rsi_alert_config = normalize_rsi_alert_config(DEFAULT_RSI_ALERT_CONFIG)
         self._load_divergence_settings_from_storage()
+        self._load_rsi_settings_from_storage()
 
     def check_all_conditions(self, stock):
         alerts = []
@@ -101,8 +111,7 @@ class AlertChecker:
             alerts.extend(conditions)
 
         if stock_cfg.get("common", False):
-            periods = [1, 5, 30]  # 保持硬编码，不修改配置读取
-            for period in periods:
+            for period in get_enabled_rsi_windows(stock_cfg, self.get_rsi_alert_config()):
                 common_alerts = self._check_common_by_min(stock, period)
                 alerts.extend(common_alerts)
 
@@ -110,7 +119,10 @@ class AlertChecker:
         alerts.extend(divergence_alerts)
 
         point_mode = self._get_point_monitor_mode(stock_cfg)
-        return [item for item in alerts if self._is_alert_allowed_by_point_mode(item, point_mode)]
+        return [
+            item for item in alerts
+            if self._is_alert_allowed_by_point_mode(item, point_mode, stock_cfg)
+        ]
 
     def _get_point_monitor_mode(self, stock_cfg):
         if not self._to_bool(stock_cfg.get('is_monitor'), True):
@@ -129,7 +141,7 @@ class AlertChecker:
             return alert_item[0]
         return None
 
-    def _is_buy_side_alert(self, alert_payload):
+    def _is_buy_side_alert(self, alert_payload, stock_cfg=None):
         alert_type = str(alert_payload.get('alert_type') or '').strip()
         message = str(alert_payload.get('alert_message') or '')
         if alert_type in {'买点', '底背离'}:
@@ -137,19 +149,11 @@ class AlertChecker:
         if alert_type == '背离' and '底背离' in message:
             return True
         if alert_type == '观察':
-            lowered = message.lower()
-            if 'rsi_6_up' in lowered:
-                return True
-            if 'rsi_6:' in lowered:
-                match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
-                if match:
-                    try:
-                        return float(match.group(1)) <= 20
-                    except (TypeError, ValueError):
-                        return False
+            side = classify_rsi_message_side(message, stock_cfg, self.get_rsi_alert_config())
+            return side == 'buy'
         return False
 
-    def _is_sell_side_alert(self, alert_payload):
+    def _is_sell_side_alert(self, alert_payload, stock_cfg=None):
         alert_type = str(alert_payload.get('alert_type') or '').strip()
         message = str(alert_payload.get('alert_message') or '')
         if alert_type in {'卖点', '顶背离'}:
@@ -157,19 +161,11 @@ class AlertChecker:
         if alert_type == '背离' and '顶背离' in message:
             return True
         if alert_type == '观察':
-            lowered = message.lower()
-            if 'rsi_6_down' in lowered:
-                return True
-            if 'rsi_6:' in lowered:
-                match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
-                if match:
-                    try:
-                        return float(match.group(1)) >= 80
-                    except (TypeError, ValueError):
-                        return False
+            side = classify_rsi_message_side(message, stock_cfg, self.get_rsi_alert_config())
+            return side == 'sell'
         return False
 
-    def _is_alert_allowed_by_point_mode(self, alert_item, point_mode):
+    def _is_alert_allowed_by_point_mode(self, alert_item, point_mode, stock_cfg=None):
         payload = self._extract_alert_payload(alert_item)
         if not payload:
             return False
@@ -177,10 +173,10 @@ class AlertChecker:
         if mode == 'off':
             return False
         if mode == 'buy':
-            return self._is_buy_side_alert(payload)
+            return self._is_buy_side_alert(payload, stock_cfg)
         if mode == 'sell':
-            return self._is_sell_side_alert(payload)
-        return self._is_buy_side_alert(payload) or self._is_sell_side_alert(payload)
+            return self._is_sell_side_alert(payload, stock_cfg)
+        return self._is_buy_side_alert(payload, stock_cfg) or self._is_sell_side_alert(payload, stock_cfg)
 
     def _load_divergence_periods(self):
         raw = str(os.getenv('DIVERGENCE_MONITOR_PERIODS', 'm30') or '').strip().lower()
@@ -297,6 +293,70 @@ class AlertChecker:
 
         if persist:
             self._save_divergence_settings_to_storage()
+
+    def _load_rsi_settings_from_storage(self):
+        self._ensure_runtime_setting_table()
+        rows = db_manager.execute_query(
+            f"SELECT setting_value FROM {_RUNTIME_SETTING_TABLE} WHERE setting_key = %s LIMIT 1",
+            (_RSI_SETTING_KEY,),
+        )
+        if not rows:
+            return
+        raw_value = rows[0].get('setting_value')
+        if not raw_value:
+            return
+        try:
+            payload = json.loads(raw_value)
+        except Exception:
+            return
+        self.update_rsi_alert_config(payload, persist=False)
+
+    def _save_rsi_settings_to_storage(self):
+        self._ensure_runtime_setting_table()
+        payload = self.get_rsi_alert_config()
+        db_manager.execute_delete(_RUNTIME_SETTING_TABLE, "setting_key = %s", (_RSI_SETTING_KEY,))
+        db_manager.execute_insert(
+            _RUNTIME_SETTING_TABLE,
+            {
+                'setting_key': _RSI_SETTING_KEY,
+                'setting_value': json.dumps(payload, ensure_ascii=False),
+            }
+        )
+
+    def get_rsi_alert_config(self):
+        with self._divergence_lock:
+            return normalize_rsi_alert_config(self._rsi_alert_config)
+
+    def update_rsi_alert_config(self, config=None, *, persist=True):
+        with self._divergence_lock:
+            self._rsi_alert_config = normalize_rsi_alert_config(
+                config,
+                base=self._rsi_alert_config,
+            )
+        if persist:
+            self._save_rsi_settings_to_storage()
+
+    def get_alert_monitor_settings(self):
+        return {
+            'divergence': self.get_divergence_config(),
+            'rsi': self.get_rsi_alert_config(),
+        }
+
+    def update_alert_monitor_settings(self, *, divergence=None, rsi=None, persist=True, reset_divergence_state=True):
+        if divergence is not None:
+            self.update_divergence_config(
+                periods=divergence.get('periods'),
+                scan_interval_seconds=divergence.get('scan_interval_seconds'),
+                kline_count=divergence.get('kline_count'),
+                lookback=divergence.get('lookback'),
+                persist=False,
+                reset_state=reset_divergence_state,
+            )
+        if rsi is not None:
+            self.update_rsi_alert_config(rsi, persist=False)
+        if persist:
+            self._save_divergence_settings_to_storage()
+            self._save_rsi_settings_to_storage()
 
     def _check_divergence_alerts(self, stock):
         alerts = []
@@ -947,21 +1007,9 @@ class AlertChecker:
 
         return self._analyze_technical_patterns(stock, window, results_min)
 
-    def _is_new_candle_data(self, stock, window, results_min=None):
-        """检查是否有新的K线数据"""
-        if results_min is None:
-            results_min = IndexAnalysis.rt_min(stock, window)
-        if results_min is None or results_min.empty:
-            return False
-
-        current_time = results_min.iloc[-1]['candle_end_time']
-        state_key = f"{stock}_{window}"
-        last_time = self._last_candle_times.get(state_key)
-
-        if last_time is None or current_time > last_time:
-            self._last_candle_times[state_key] = current_time
-            return True
-        return False
+    def _resolve_rsi_period_config(self, stock, window):
+        stock_cfg = self.config.MONITOR_STOCKS.get(stock, {}) or {}
+        return get_rsi_period_config(stock_cfg, window, self.get_rsi_alert_config())
 
     def _analyze_technical_patterns(self, stock, window, results_min):
         """分析技术形态模式"""
@@ -982,32 +1030,33 @@ class AlertChecker:
     def _analyze_rsi_patterns(self, stock, window, results_min, last_k, prev_k, prev_prev_k):
         """分析RSI相关模式"""
         alerts = []
+        period_cfg = self._resolve_rsi_period_config(stock, window)
+        if not period_cfg:
+            return alerts
+
         rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-1], 6).__round__(1)
         pre_rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
 
         # RSI边界警报
-        rsi_alert = self._check_rsi_boundary(stock, window, rsi_6, pre_rsi_6)
+        rsi_alert = self._check_rsi_boundary(stock, window, rsi_6, pre_rsi_6, period_cfg)
         if rsi_alert:
             alerts.append(rsi_alert)
 
         # RSI极端值模式
-        extreme_alerts = self._check_rsi_extreme_patterns(stock, window, pre_rsi_6, last_k, prev_k)
+        extreme_alerts = self._check_rsi_extreme_patterns(stock, window, pre_rsi_6, last_k, prev_k, period_cfg)
         alerts.extend(extreme_alerts)
 
         return alerts
 
-    def _get_rsi_thresholds(self, window):
-        if int(window) == 30:
-            return 30, 70
-        return 20, 80
+    def _get_rsi_thresholds(self, period_cfg):
+        if not period_cfg:
+            return None, None
+        return float(period_cfg['low']), float(period_cfg['high'])
 
-    def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6):
+    def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6, period_cfg):
         """检查RSI边界条件"""
-        # 取消 1 分钟 RSI 越界（<20 或 >80）告警，避免高频噪声。
-        if window == 1:
-            state_key = f"{stock}_{window}"
-            if state_key in self._rsi_trigger_states:
-                self._rsi_trigger_states[state_key]['last_rsi_triggered'] = False
+        low_threshold, high_threshold = self._get_rsi_thresholds(period_cfg)
+        if low_threshold is None or high_threshold is None:
             return None
 
         state_key = f"{stock}_{window}"
@@ -1015,20 +1064,26 @@ class AlertChecker:
             self._rsi_trigger_states[state_key] = {'last_rsi_triggered': False}
 
         current_state = self._rsi_trigger_states[state_key]
-        low_threshold, high_threshold = self._get_rsi_thresholds(window)
+        boundary_low_enabled = bool(period_cfg.get('boundary_low'))
+        boundary_high_enabled = bool(period_cfg.get('boundary_high'))
+        if not boundary_low_enabled and not boundary_high_enabled:
+            current_state['last_rsi_triggered'] = False
+            return None
 
         if not low_threshold <= rsi_6 <= high_threshold:
-            # 取消 5 分钟周期 RSI 低位（<=20）告警，仅保留高位（>=80）告警。
-            if window == 5 and rsi_6 <= low_threshold:
+            is_low = rsi_6 <= low_threshold
+            is_high = rsi_6 >= high_threshold
+            if (is_low and not boundary_low_enabled) or (is_high and not boundary_high_enabled):
                 current_state['last_rsi_triggered'] = False
                 return None
+
             is_consecutive_trigger = (
                 pre_rsi_6 is not None and not low_threshold <= pre_rsi_6 <= high_threshold
             )
 
             if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
                 current_state['last_rsi_triggered'] = True
-                alert_type = '买点' if rsi_6 <= low_threshold else '卖点'
+                alert_type = '买点' if is_low else '卖点'
                 return self._create_alert_data(
                     stock,
                     f"({window}min)rsi_6:{rsi_6}",
@@ -1036,24 +1091,20 @@ class AlertChecker:
                     alert_type,
                     chart_period=self._minute_window_to_chart_period(window),
                 )
-            else:
-                current_state['last_rsi_triggered'] = True
+            current_state['last_rsi_triggered'] = True
         else:
             current_state['last_rsi_triggered'] = False
 
         return None
 
-    def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_6, last_k, prev_k):
+    def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_6, last_k, prev_k, period_cfg):
         """检查RSI极端值的K线模式"""
-        # 1 分钟级别不再监控 RSI 20/80 相关模式（rsi_6_up / rsi_6_down）。
-        if window == 1:
-            return []
-
         alerts = []
-        low_threshold, high_threshold = self._get_rsi_thresholds(window)
+        low_threshold, high_threshold = self._get_rsi_thresholds(period_cfg)
+        if low_threshold is None or high_threshold is None:
+            return alerts
 
-        # RSI低位反弹模式
-        if window != 5 and pre_rsi_6 <= low_threshold and self._is_bullish_reversal(last_k, prev_k):
+        if period_cfg.get('reversal_low') and pre_rsi_6 <= low_threshold and self._is_bullish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock,
                 f"({window}min)rsi_6_up",
@@ -1062,8 +1113,7 @@ class AlertChecker:
                 chart_period=self._minute_window_to_chart_period(window),
             ))
 
-        # RSI高位回落模式
-        if pre_rsi_6 >= high_threshold and self._is_bearish_reversal(last_k, prev_k):
+        if period_cfg.get('reversal_high') and pre_rsi_6 >= high_threshold and self._is_bearish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock,
                 f"({window}min)rsi_6_down",
@@ -1077,37 +1127,37 @@ class AlertChecker:
     def _analyze_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k, results_min):
         """分析K线形态模式"""
         alerts = []
+        period_cfg = self._resolve_rsi_period_config(stock, window)
+        if not period_cfg or not period_cfg.get('engulfing'):
+            return alerts
+
         rsi_6 = None
         try:
             rsi_6 = float(IndicatorCalculation.calculate_rsi(results_min[:-1], 6))
         except Exception:
             rsi_6 = None
 
-        # 吞没形态
-        engulfing_alert = self._check_engulfing_pattern(stock, window, last_k, prev_k, rsi_6)
+        engulfing_alert = self._check_engulfing_pattern(stock, window, last_k, prev_k, rsi_6, period_cfg)
         if engulfing_alert:
             alerts.append(engulfing_alert)
 
-        # 三根K线组合模式
         triple_pattern_alerts = self._check_triple_candle_patterns(stock, window, last_k, prev_k, prev_prev_k)
         alerts.extend(triple_pattern_alerts)
 
         return alerts
 
-    def _check_engulfing_pattern(self, stock, window, last_k, prev_k, rsi_6=None):
-        if window == 1:
-            return None
+    def _check_engulfing_pattern(self, stock, window, last_k, prev_k, rsi_6=None, period_cfg=None):
         """检查吞没形态"""
-        # 仅在 RSI 进入极值区间时触发吞没告警，避免噪声信号。
-        if rsi_6 is None:
+        if rsi_6 is None or not period_cfg:
             return None
 
-        low_threshold, high_threshold = self._get_rsi_thresholds(window)
+        low_threshold, high_threshold = self._get_rsi_thresholds(period_cfg)
+        if low_threshold is None or high_threshold is None:
+            return None
 
-        # 阳包阴
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and
                 last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount'] and
-                rsi_6 < low_threshold and window != 5):
+                rsi_6 < low_threshold):
             return self._create_alert_data(
                 stock,
                 f"({window}min)engulfing_up",
@@ -1116,8 +1166,7 @@ class AlertChecker:
                 chart_period=self._minute_window_to_chart_period(window),
             )
 
-        # 阴包阳
-        elif (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and
+        if (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and
               last_k['close'] < last_k['open'] and last_k['amount'] > prev_k['amount'] and
               rsi_6 > high_threshold):
             return self._create_alert_data(
@@ -1129,6 +1178,22 @@ class AlertChecker:
             )
 
         return None
+
+    def _is_new_candle_data(self, stock, window, results_min=None):
+        """检查是否有新的K线数据"""
+        if results_min is None:
+            results_min = IndexAnalysis.rt_min(stock, window)
+        if results_min is None or results_min.empty:
+            return False
+
+        current_time = results_min.iloc[-1]['candle_end_time']
+        state_key = f"{stock}_{window}"
+        last_time = self._last_candle_times.get(state_key)
+
+        if last_time is None or current_time > last_time:
+            self._last_candle_times[state_key] = current_time
+            return True
+        return False
 
     def _check_triple_candle_patterns(self, stock, window, last_k, prev_k, prev_prev_k):
         """检查三根K线组合模式（已停用）"""
