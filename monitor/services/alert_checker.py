@@ -21,6 +21,7 @@ from utils.kline_forward_adjust import (
 from utils.divergence_service import fetch_kline_rows
 from monitor.config.db_monitor import db_manager
 from monitor.config.alert_monitor_config import (
+    normalize_point_monitor_mode,
     DEFAULT_RSI_ALERT_CONFIG,
     classify_rsi_message_side,
     get_enabled_rsi_windows,
@@ -59,6 +60,7 @@ _DIVERGENCE_RECENT_BAR_LIMIT = {
 _RUNTIME_SETTING_TABLE = 'monitor_runtime_settings'
 _DIVERGENCE_SETTING_KEY = 'divergence_monitor_config'
 _RSI_SETTING_KEY = 'rsi_alert_config'
+_STOCK_TEMPLATE_SETTING_KEY = 'stock_alert_template'
 
 
 class AlertChecker:
@@ -78,8 +80,10 @@ class AlertChecker:
         self._divergence_last_signal = {}
         self._divergence_bootstrapped = set()
         self._rsi_alert_config = normalize_rsi_alert_config(DEFAULT_RSI_ALERT_CONFIG)
+        self._default_point_monitor_mode = 'both'
         self._load_divergence_settings_from_storage()
         self._load_rsi_settings_from_storage()
+        self._load_stock_template_settings_from_storage()
 
     def check_all_conditions(self, stock):
         alerts = []
@@ -340,9 +344,51 @@ class AlertChecker:
         return {
             'divergence': self.get_divergence_config(),
             'rsi': self.get_rsi_alert_config(),
+            'point_monitor_mode': self._default_point_monitor_mode,
         }
 
-    def update_alert_monitor_settings(self, *, divergence=None, rsi=None, persist=True, reset_divergence_state=True):
+    def _load_stock_template_settings_from_storage(self):
+        self._ensure_runtime_setting_table()
+        rows = db_manager.execute_query(
+            f"SELECT setting_value FROM {_RUNTIME_SETTING_TABLE} WHERE setting_key = %s LIMIT 1",
+            (_STOCK_TEMPLATE_SETTING_KEY,),
+        )
+        if not rows:
+            return
+        raw_value = rows[0].get('setting_value')
+        if not raw_value:
+            return
+        try:
+            payload = json.loads(raw_value)
+        except Exception:
+            return
+        if payload.get('point_monitor_mode') is not None:
+            self._default_point_monitor_mode = normalize_point_monitor_mode(
+                payload.get('point_monitor_mode'),
+                self._default_point_monitor_mode,
+            )
+
+    def _save_stock_template_settings_to_storage(self):
+        self._ensure_runtime_setting_table()
+        payload = {'point_monitor_mode': self._default_point_monitor_mode}
+        db_manager.execute_delete(_RUNTIME_SETTING_TABLE, "setting_key = %s", (_STOCK_TEMPLATE_SETTING_KEY,))
+        db_manager.execute_insert(
+            _RUNTIME_SETTING_TABLE,
+            {
+                'setting_key': _STOCK_TEMPLATE_SETTING_KEY,
+                'setting_value': json.dumps(payload, ensure_ascii=False),
+            },
+        )
+
+    def update_alert_monitor_settings(
+        self,
+        *,
+        divergence=None,
+        rsi=None,
+        point_monitor_mode=None,
+        persist=True,
+        reset_divergence_state=True,
+    ):
         if divergence is not None:
             self.update_divergence_config(
                 periods=divergence.get('periods'),
@@ -354,9 +400,12 @@ class AlertChecker:
             )
         if rsi is not None:
             self.update_rsi_alert_config(rsi, persist=False)
+        if point_monitor_mode is not None:
+            self._default_point_monitor_mode = normalize_point_monitor_mode(point_monitor_mode)
         if persist:
             self._save_divergence_settings_to_storage()
             self._save_rsi_settings_to_storage()
+            self._save_stock_template_settings_to_storage()
 
     def _check_divergence_alerts(self, stock):
         alerts = []

@@ -38,8 +38,8 @@ DEFAULT_RSI_PERIOD_PRESETS: Dict[int, Dict[str, Any]] = {
         'high': 80,
         'boundary_low': False,
         'boundary_high': True,
-        'reversal_low': False,
-        'reversal_high': True,
+        'reversal_low': True,
+        'reversal_high': False,
         'engulfing': True,
     },
     30: {
@@ -61,7 +61,21 @@ DEFAULT_RSI_ALERT_CONFIG: Dict[str, Any] = {
     },
 }
 
+def normalize_point_monitor_mode(raw_value: Any, default: str = 'both') -> str:
+    text = str(raw_value or '').strip().lower()
+    if text in {'off', 'none', 'stop', 'disable', '停止监控', '关闭监控'}:
+        return 'off'
+    if text in {'buy', 'buy_only', 'only_buy', '仅买点'}:
+        return 'buy'
+    if text in {'sell', 'sell_only', 'only_sell', '仅卖点'}:
+        return 'sell'
+    if text in {'both', 'all', '买卖点', '都监视'}:
+        return 'both'
+    return default
+
+
 DEFAULT_STOCK_ALERT_TEMPLATE: Dict[str, Any] = {
+    'point_monitor_mode': 'both',
     'common': True,
     'divergence_enabled': True,
     'divergence_macd_enabled': True,

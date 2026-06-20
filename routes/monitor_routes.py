@@ -18,6 +18,7 @@ from utils.divergence_service import compute_divergence_points
 from monitor.config.alert_monitor_config import (
     DEFAULT_RSI_ALERT_CONFIG,
     DEFAULT_STOCK_ALERT_TEMPLATE,
+    normalize_point_monitor_mode,
     normalize_rsi_alert_config,
     parse_rsi_alert_config_from_storage,
     rsi_alert_config_to_storage_text,
@@ -105,16 +106,17 @@ def _to_int_or_none(value):
 
 
 def _normalize_point_monitor_mode(raw_value, default='both'):
-    text = str(raw_value or '').strip().lower()
-    if text in {'off', 'none', 'stop', 'disable', '停止监控', '关闭监控'}:
-        return 'off'
-    if text in {'buy', 'buy_only', 'only_buy', '仅买点'}:
-        return 'buy'
-    if text in {'sell', 'sell_only', 'only_sell', '仅卖点'}:
-        return 'sell'
-    if text in {'both', 'all', '买卖点', '都监视'}:
-        return 'both'
-    return default
+    return normalize_point_monitor_mode(raw_value, default)
+
+
+def _sync_alert_enabled_fields_for_point_mode(payload):
+    """根据买卖点监视模式同步 common / divergence 开关。"""
+    mode = _normalize_point_monitor_mode(payload.get('point_monitor_mode'), 'both')
+    payload['point_monitor_mode'] = mode
+    enabled = 0 if mode == 'off' else 1
+    payload['common'] = enabled
+    payload['divergence_enabled'] = enabled
+    return payload
 
 
 def _normalize_divergence_periods(periods):
@@ -241,6 +243,109 @@ def _build_divergence_patch_from_payload(data):
     if 'rsi_alert_config' in data:
         patch['rsi_alert_config'] = rsi_alert_config_to_storage_text(data.get('rsi_alert_config'))
     return patch
+
+
+_ALERT_EXPLICIT_FIELDS = {
+    'common', 'divergence_enabled', 'divergence_macd_enabled',
+    'divergence_top_enabled', 'divergence_bottom_enabled',
+    'divergence_periods', 'divergence_scan_interval_seconds',
+    'divergence_kline_count', 'divergence_lookback', 'rsi_alert_config',
+    'point_monitor_mode', 'point_monitor_enabled', 'normal_movement',
+}
+
+
+def _has_explicit_alert_fields(data):
+    return any(key in (data or {}) for key in _ALERT_EXPLICIT_FIELDS)
+
+
+def _stock_has_saved_alert_config(stock_row):
+    """判断股票是否已有独立告警配置（非空模板）。"""
+    if not stock_row:
+        return False
+    if _to_bool(stock_row.get('common'), False):
+        return True
+    if _to_bool(stock_row.get('divergence_enabled'), False):
+        return True
+    raw_rsi = stock_row.get('rsi_alert_config')
+    if raw_rsi not in (None, '', 'null', '{}'):
+        return True
+    return False
+
+
+def _build_global_alert_defaults_payload(checker):
+    """读取全局告警默认，转为添加/更新股票时的请求体结构。"""
+    settings = checker.get_alert_monitor_settings()
+    divergence = settings.get('divergence') or {}
+    rsi = settings.get('rsi') or DEFAULT_RSI_ALERT_CONFIG
+    payload = {
+        'point_monitor_mode': settings.get('point_monitor_mode') or 'both',
+        'common': 1,
+        'normal_movement': 0,
+        'divergence_enabled': 1,
+        'divergence_macd_enabled': 1,
+        'divergence_rsi_enabled': 0,
+        'divergence_top_enabled': 1,
+        'divergence_bottom_enabled': 1,
+        'divergence_periods': divergence.get('periods') or ['m30'],
+        'divergence_scan_interval_seconds': divergence.get('scan_interval_seconds') or 60,
+        'divergence_kline_count': divergence.get('kline_count') or 240,
+        'divergence_lookback': divergence.get('lookback') or 3,
+        'rsi_alert_config': rsi,
+    }
+    return _sync_alert_enabled_fields_for_point_mode(payload)
+
+
+def _build_stock_alert_template_payload(divergence=None, rsi=None, point_monitor_mode=None, checker=None):
+    """合并请求体与已保存全局默认，生成可写入股票记录的告警模板。"""
+    checker = checker or get_alert_checker()
+    payload = _build_global_alert_defaults_payload(checker)
+    if isinstance(divergence, dict):
+        if divergence.get('periods') is not None:
+            payload['divergence_periods'] = _normalize_divergence_periods(divergence.get('periods'))
+        for src_key, dst_key in (
+            ('scan_interval_seconds', 'divergence_scan_interval_seconds'),
+            ('kline_count', 'divergence_kline_count'),
+            ('lookback', 'divergence_lookback'),
+        ):
+            if divergence.get(src_key) is not None:
+                payload[dst_key] = divergence.get(src_key)
+    if rsi is not None:
+        payload['rsi_alert_config'] = normalize_rsi_alert_config(rsi)
+    if point_monitor_mode is not None:
+        payload['point_monitor_mode'] = point_monitor_mode
+    return _sync_alert_enabled_fields_for_point_mode(payload)
+
+
+def _apply_alert_template_to_monitored_stocks(template_payload):
+    """将告警模板批量应用到所有 is_monitor=1 的股票（保留代码/名称/排序/价格区间）。"""
+    patch = _build_divergence_patch_from_payload(template_payload)
+    mode = _normalize_point_monitor_mode(template_payload.get('point_monitor_mode'), 'both')
+    patch['point_monitor_mode'] = mode
+    patch['point_monitor_enabled'] = 0 if mode == 'off' else 1
+
+    rows = db_manager.execute_query('SELECT id FROM stocks WHERE is_monitor = 1') or []
+    if not rows:
+        monitor_count = _reload_monitor_runtime()
+        return 0, monitor_count
+
+    for row in rows:
+        db_manager.execute_update(
+            'stocks',
+            patch,
+            'id = %s',
+            (row['id'],),
+        )
+    monitor_count = _reload_monitor_runtime()
+    return len(rows), monitor_count
+
+
+def _resolve_alert_patch_from_request(data, checker, existing_row=None):
+    """未显式传告警字段时，自动套用全局默认配置。"""
+    if _has_explicit_alert_fields(data):
+        return _build_divergence_patch_from_payload(data)
+    if existing_row and _stock_has_saved_alert_config(existing_row):
+        return _build_divergence_patch_from_payload(data)
+    return _build_divergence_patch_from_payload(_build_global_alert_defaults_payload(checker))
 
 
 def _safe_float(value):
@@ -765,6 +870,7 @@ def add_monitor_stock():
             return jsonify({'success': False, 'message': '股票代码不能为空'}), 400
 
         existing = _find_stock_row_by_exact_code(stock_code) or _find_stock_row_by_aliases(raw_stock_code, stock_name)
+        checker = get_alert_checker()
         
         if existing:
             reactivate_data = {
@@ -776,15 +882,15 @@ def add_monitor_stock():
                 reactivate_data['sort_order'] = existing.get('sort_order') or _get_next_monitor_sort_order()
             else:
                 reactivate_data['sort_order'] = _get_next_monitor_sort_order()
-            if 'common' in data:
-                reactivate_data['common'] = 1 if data['common'] else 0
-            if 'normal_movement' in data:
-                reactivate_data['normal_movement'] = 1 if data['normal_movement'] else 0
             if 'trigger_min_price' in data:
                 reactivate_data['trigger_min_price'] = data.get('trigger_min_price')
             if 'trigger_max_price' in data:
                 reactivate_data['trigger_max_price'] = data.get('trigger_max_price')
-            reactivate_data.update(_build_divergence_patch_from_payload(data))
+            reactivate_data.update(_resolve_alert_patch_from_request(data, checker, existing))
+            if 'common' in data:
+                reactivate_data['common'] = 1 if data['common'] else 0
+            if 'normal_movement' in data:
+                reactivate_data['normal_movement'] = 1 if data['normal_movement'] else 0
 
             # 更新为监控状态
             db_manager.execute_update(
@@ -807,15 +913,15 @@ def add_monitor_stock():
             'is_monitor': 1,
             'sort_order': _get_next_monitor_sort_order(),
         }
-        if 'common' in data:
-            insert_data['common'] = 1 if data['common'] else 0
-        if 'normal_movement' in data:
-            insert_data['normal_movement'] = 1 if data['normal_movement'] else 0
         if 'trigger_min_price' in data:
             insert_data['trigger_min_price'] = data.get('trigger_min_price')
         if 'trigger_max_price' in data:
             insert_data['trigger_max_price'] = data.get('trigger_max_price')
-        insert_data.update(_build_divergence_patch_from_payload(data))
+        insert_data.update(_resolve_alert_patch_from_request(data, checker))
+        if 'common' in data:
+            insert_data['common'] = 1 if data['common'] else 0
+        if 'normal_movement' in data:
+            insert_data['normal_movement'] = 1 if data['normal_movement'] else 0
         
         stock_id = db_manager.execute_insert('stocks', insert_data)
         if not stock_id:
@@ -1204,6 +1310,7 @@ def update_alert_monitor_settings():
         payload = request.get_json(silent=True) or {}
         divergence_payload = payload.get('divergence')
         rsi_payload = payload.get('rsi')
+        point_monitor_mode = payload.get('point_monitor_mode')
 
         if divergence_payload:
             for key in ('scan_interval_seconds', 'kline_count', 'lookback'):
@@ -1217,6 +1324,7 @@ def update_alert_monitor_settings():
         checker.update_alert_monitor_settings(
             divergence=divergence_payload,
             rsi=rsi_payload,
+            point_monitor_mode=point_monitor_mode,
             persist=True,
             reset_divergence_state=True,
         )
@@ -1224,6 +1332,42 @@ def update_alert_monitor_settings():
             'success': True,
             'message': '全局告警配置已更新并立即生效',
             'data': checker.get_alert_monitor_settings(),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/settings/alert-monitor/apply-to-stocks', methods=['POST'])
+def apply_alert_monitor_settings_to_stocks():
+    """将当前全局告警默认批量应用到所有监控中的股票。"""
+    try:
+        _ensure_monitor_stock_columns_once()
+        payload = request.get_json(silent=True) or {}
+        divergence_payload = payload.get('divergence')
+        rsi_payload = payload.get('rsi')
+        point_monitor_mode = payload.get('point_monitor_mode')
+
+        if divergence_payload:
+            for key in ('scan_interval_seconds', 'kline_count', 'lookback'):
+                if divergence_payload.get(key) is not None:
+                    try:
+                        divergence_payload[key] = int(divergence_payload[key])
+                    except (TypeError, ValueError):
+                        return jsonify({'success': False, 'message': f'{key} 格式错误'}), 400
+
+        checker = get_alert_checker()
+        template = _build_stock_alert_template_payload(
+            divergence=divergence_payload,
+            rsi=rsi_payload,
+            point_monitor_mode=point_monitor_mode,
+            checker=checker,
+        )
+        updated_count, monitor_count = _apply_alert_template_to_monitored_stocks(template)
+        return jsonify({
+            'success': True,
+            'message': f'已将 {updated_count} 只监控股票重置为当前默认告警配置',
+            'updated_count': updated_count,
+            'monitor_count': monitor_count,
         })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500

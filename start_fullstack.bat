@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions
+chcp 65001 >nul
 
 REM Script location (backend repo: trade_v)
 set "BACKEND_DIR=%~dp0"
@@ -10,15 +11,22 @@ set "VENV_PY=%BACKEND_DIR%\.venv\Scripts\python.exe"
 set "PYTHON_EXE="
 set "FRONTEND_VITE_BIN=%FRONTEND_DIR%\node_modules\.bin\vite.cmd"
 set "FRONTEND_PORT=5173"
+set "LOG_DIR=%BACKEND_DIR%\logs"
+set "BACKEND_LOG=%LOG_DIR%\backend.log"
+set "BACKEND_ERR_LOG=%LOG_DIR%\backend.err.log"
+set "FRONTEND_LOG=%LOG_DIR%\frontend.log"
+set "FRONTEND_ERR_LOG=%LOG_DIR%\frontend.err.log"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 if not exist "%FRONTEND_DIR%\package.json" (
-  echo [ERROR] Frontend directory not found: "%FRONTEND_DIR%"
+  echo [ERROR] Frontend directory not found. Expected sibling folder: trader_front
   pause
   exit /b 1
 )
 
 if not exist "%BACKEND_DIR%\app.py" (
-  echo [ERROR] Backend app.py not found: "%BACKEND_DIR%\app.py"
+  echo [ERROR] Backend app.py not found.
   pause
   exit /b 1
 )
@@ -44,7 +52,7 @@ if exist "%VENV_PY%" (
 )
 
 if not exist "%VENV_PY%" (
-  echo [INFO] Creating backend virtual environment: %BACKEND_DIR%\.venv
+  echo [INFO] Creating backend virtual environment: .venv
   py -3.12 -m venv "%BACKEND_DIR%\.venv" >nul 2>nul
   if errorlevel 1 (
     py -3.11 -m venv "%BACKEND_DIR%\.venv" >nul 2>nul
@@ -103,6 +111,8 @@ if not exist "%FRONTEND_VITE_BIN%" (
   )
 )
 
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+
 echo [INFO] Checking and stopping existing backend/frontend services...
 call :stop_existing_services
 ping -n 2 127.0.0.1 >nul
@@ -112,18 +122,38 @@ call :stop_port_listener 5174
 call :stop_port_listener 5175
 
 echo Starting backend...
-REM 使用独立 bat 启动，避免 cmd /k 嵌套引号在中文路径下解析错误
-start "trade_v backend" /D "%BACKEND_DIR%" cmd /k call "%BACKEND_DIR%\start_backend.bat"
+call :write_log_header "%BACKEND_LOG%" "trade_v backend stdout"
+call :write_log_header "%BACKEND_ERR_LOG%" "trade_v backend stderr"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p = Start-Process -FilePath '%PYTHON_EXE%' -ArgumentList @('%BACKEND_DIR%\app.py') -WorkingDirectory '%BACKEND_DIR%' -WindowStyle Hidden -RedirectStandardOutput '%BACKEND_LOG%' -RedirectStandardError '%BACKEND_ERR_LOG%' -PassThru;" ^
+  "Write-Host ('[INFO] Backend PID ' + $p.Id + ' logging to logs\backend.log')"
 
 echo Starting frontend...
-start "trader_front frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && title trader_front frontend && npm run dev -- --port %FRONTEND_PORT% --strictPort"
+call :write_log_header "%FRONTEND_LOG%" "trader_front frontend stdout"
+call :write_log_header "%FRONTEND_ERR_LOG%" "trader_front frontend stderr"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','dev','--','--port','%FRONTEND_PORT%','--strictPort') -WorkingDirectory '%FRONTEND_DIR%' -WindowStyle Hidden -RedirectStandardOutput '%FRONTEND_LOG%' -RedirectStandardError '%FRONTEND_ERR_LOG%' -PassThru;" ^
+  "Write-Host ('[INFO] Frontend PID ' + $p.Id + ' logging to logs\frontend.log')"
 
-echo Done. Two windows opened:
+echo Done. Services are running in background:
 echo - Backend:  http://127.0.0.1:5000
 echo - Frontend: http://127.0.0.1:%FRONTEND_PORT%
 echo [TIP] Script auto-clears listeners on ports 5000/5173-5175 before launch.
+echo [TIP] Logs:
+echo   Backend stdout:  logs\backend.log
+echo   Backend stderr:  logs\backend.err.log
+echo   Frontend stdout: logs\frontend.log
+echo   Frontend stderr: logs\frontend.err.log
 
 endlocal
+exit /b 0
+
+:write_log_header
+set "HEADER_FILE=%~1"
+set "HEADER_NAME=%~2"
+> "%HEADER_FILE%" echo ===== %HEADER_NAME% =====
+>> "%HEADER_FILE%" echo Started at %DATE% %TIME%
+>> "%HEADER_FILE%" echo.
 exit /b 0
 
 :stop_existing_services
