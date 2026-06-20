@@ -151,6 +151,40 @@ def _parse_periods_from_storage(raw_value):
     return list(_DIVERGENCE_DEFAULT_PERIODS)
 
 
+def _parse_json_array(raw_value):
+    if isinstance(raw_value, str) and raw_value.strip():
+        try:
+            parsed = json.loads(raw_value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    if isinstance(raw_value, list):
+        return raw_value
+    return []
+
+
+def _price_thresholds_to_storage_text(thresholds):
+    normalized = []
+    for item in thresholds or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            price = float(item.get('price'))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        direction = str(item.get('direction') or '').strip().lower()
+        if direction not in {'above', 'below'}:
+            continue
+        normalized.append({
+            'price': round(price, 4),
+            'direction': direction,
+            'source': str(item.get('source') or 'kline').strip() or 'kline',
+        })
+    return json.dumps(normalized, ensure_ascii=False)
+
+
 def _apply_rsi_defaults_to_stock(stock):
     stock['rsi_alert_config'] = parse_rsi_alert_config_from_storage(stock.get('rsi_alert_config'))
 
@@ -517,7 +551,7 @@ def _find_stock_row_by_aliases(stock_code, stock_name=""):
         return None
     placeholders = ", ".join(["%s"] * len(aliases))
     rows = db_manager.execute_query(
-        f"SELECT id, stock_code, stock_name, is_monitor, sort_order FROM stocks WHERE stock_code IN ({placeholders}) ORDER BY is_monitor DESC, id DESC LIMIT 1",
+        f"SELECT id, stock_code, stock_name, is_monitor, sort_order, price_thresholds FROM stocks WHERE stock_code IN ({placeholders}) ORDER BY is_monitor DESC, id DESC LIMIT 1",
         tuple(aliases)
     )
     return rows[0] if rows else None
@@ -525,7 +559,7 @@ def _find_stock_row_by_aliases(stock_code, stock_name=""):
 
 def _find_stock_row_by_id(stock_id):
     rows = db_manager.execute_query(
-        "SELECT id, stock_code, stock_name, is_monitor, sort_order FROM stocks WHERE id = %s LIMIT 1",
+        "SELECT id, stock_code, stock_name, is_monitor, sort_order, price_thresholds FROM stocks WHERE id = %s LIMIT 1",
         (stock_id,),
     )
     return rows[0] if rows else None
@@ -535,7 +569,7 @@ def _find_stock_row_by_exact_code(stock_code, exclude_id=None):
     if not stock_code:
         return None
 
-    query = "SELECT id, stock_code, stock_name, is_monitor, sort_order FROM stocks WHERE stock_code = %s"
+    query = "SELECT id, stock_code, stock_name, is_monitor, sort_order, price_thresholds FROM stocks WHERE stock_code = %s"
     params = [stock_code]
     if exclude_id is not None:
         query += " AND id <> %s"
@@ -611,6 +645,8 @@ def _update_monitor_stock_row(row, stock_code_hint, data):
         update_data['trigger_min_price'] = data.get('trigger_min_price')
     if 'trigger_max_price' in data:
         update_data['trigger_max_price'] = data.get('trigger_max_price')
+    if 'price_thresholds' in data:
+        update_data['price_thresholds'] = _price_thresholds_to_storage_text(data.get('price_thresholds'))
     if 'sort_order' in data:
         try:
             update_data['sort_order'] = int(data.get('sort_order'))
@@ -679,6 +715,9 @@ def _ensure_monitor_stock_columns_once():
                 cursor = conn.cursor(dictionary=True)
                 expected_columns = {
                     'sort_order': "ALTER TABLE stocks ADD COLUMN sort_order INT NULL COMMENT '监控股票排序'",
+                    'price_thresholds': "ALTER TABLE stocks ADD COLUMN price_thresholds TEXT NULL COMMENT '价格到达告警配置(JSON数组)'",
+                    'change_thresholds': "ALTER TABLE stocks ADD COLUMN change_thresholds TEXT NULL COMMENT '涨跌幅告警配置(JSON数组)'",
+                    'ma_types': "ALTER TABLE stocks ADD COLUMN ma_types TEXT NULL COMMENT '均线告警类型(JSON数组)'",
                     'trigger_min_price': "ALTER TABLE stocks ADD COLUMN trigger_min_price DECIMAL(12,4) NULL COMMENT '告警触发最小价格'",
                     'trigger_max_price': "ALTER TABLE stocks ADD COLUMN trigger_max_price DECIMAL(12,4) NULL COMMENT '告警触发最大价格'",
                     'point_monitor_enabled': "ALTER TABLE stocks ADD COLUMN point_monitor_enabled TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否仅监视买卖点'",
@@ -978,6 +1017,61 @@ def remove_monitor_stock_by_id(stock_id):
     try:
         row = _find_stock_row_by_id(stock_id)
         return _remove_monitor_stock_row(row)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/stocks/<string:stock_code>/price-thresholds', methods=['POST'])
+def add_stock_price_threshold(stock_code):
+    """追加股票价格到达告警：上涨到某价或下跌到某价。"""
+    try:
+        _ensure_monitor_stock_columns_once()
+        data = request.get_json() or {}
+        row = _find_stock_row_by_aliases(stock_code, data.get('stock_name', ''))
+        if not row:
+            return jsonify({'success': False, 'message': '股票不存在，请先加入监控'}), 404
+
+        try:
+            price = round(float(data.get('price')), 4)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'message': '价格格式错误'}), 400
+        if price <= 0:
+            return jsonify({'success': False, 'message': '价格必须大于 0'}), 400
+
+        direction = str(data.get('direction') or '').strip().lower()
+        if direction not in {'above', 'below'}:
+            return jsonify({'success': False, 'message': '方向必须为 above 或 below'}), 400
+
+        thresholds = _parse_json_array(row.get('price_thresholds'))
+        threshold = {
+            'price': price,
+            'direction': direction,
+            'source': str(data.get('source') or 'kline').strip() or 'kline',
+        }
+        deduped = [
+            item for item in thresholds
+            if not (
+                isinstance(item, dict)
+                and str(item.get('direction') or '').strip().lower() == direction
+                and abs(float(item.get('price') or 0) - price) < 0.0001
+            )
+        ]
+        deduped.append(threshold)
+
+        db_manager.execute_update(
+            'stocks',
+            {'price_thresholds': _price_thresholds_to_storage_text(deduped)},
+            'id = %s',
+            (row['id'],),
+        )
+        monitor_count = _reload_monitor_runtime()
+        return jsonify({
+            'success': True,
+            'message': '价格告警已添加并自动生效',
+            'data': threshold,
+            'thresholds': deduped,
+            'monitor_count': monitor_count,
+        })
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 

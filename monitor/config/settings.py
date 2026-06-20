@@ -28,6 +28,16 @@ class Config:
             normalized_code = normalize_monitor_stock_code(original_code, item.get('stock_name'))
             item['stock_code'] = normalized_code
 
+            for json_key in ('price_thresholds', 'change_thresholds', 'ma_types'):
+                raw_value = item.get(json_key)
+                if isinstance(raw_value, str) and raw_value.strip():
+                    try:
+                        item[json_key] = json.loads(raw_value)
+                    except Exception:
+                        item[json_key] = []
+                elif raw_value in (None, ''):
+                    item[json_key] = []
+
             # 将历史/非标准代码规范化回数据库，避免后续路径参数与配置键不一致
             if item.get('id') and normalized_code and normalized_code != original_code:
                 duplicate_id = normalized_seen.get(normalized_code)

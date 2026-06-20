@@ -967,8 +967,13 @@ class AlertChecker:
         alerts = []
 
         for threshold_config in price_thresholds:
-            threshold_price = threshold_config["price"]
-            direction = threshold_config["direction"]
+            try:
+                threshold_price = float(threshold_config["price"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            direction = str(threshold_config.get("direction") or "").strip().lower()
+            if direction not in {"above", "below"}:
+                continue
             alert_id = f"price_{direction}_{threshold_price}"
 
             condition_met = (
@@ -977,7 +982,9 @@ class AlertChecker:
             )
 
             if condition_met:
-                alerts.append(self._create_alert_data(stock, alert_id))
+                direction_label = "上涨到" if direction == "above" else "下跌到"
+                alert_message = f"价格{direction_label}{threshold_price:.2f} | 当前价:{current_price:.2f}"
+                alerts.append(self._create_alert_data(stock, alert_message, alert_type='价格告警'))
 
         return alerts
 
