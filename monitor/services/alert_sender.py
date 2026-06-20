@@ -1,6 +1,6 @@
 import logging
 import threading
-from utils.send_dingding import send_dingtalk_message
+from utils.send_alert_message import send_alert_message
 from utils.GetStockData import get_stock_name
 from monitor.config.db_monitor import stock_alert_dao
 from monitor.config.market_calendar import is_alert_time_allowed
@@ -77,7 +77,7 @@ class AlertSender:
                 alert_info = f"{alert_data['stock_name']} {alert_data['alert_message']} 警报 {alert_data['trigger_time']}"
                 chart_period = alert_data.pop('chart_period', None)
 
-                send_dingtalk_message(alert_info, stock, chart_period=chart_period)
+                send_alert_message(alert_info, stock, chart_period=chart_period)
 
                 stock_alert_dao.insert_alert(alert_data)
 

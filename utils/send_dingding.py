@@ -4,6 +4,9 @@ import requests
 import random
 import re
 import logging
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _DEFAULT_MA_WEBHOOK_URL = 'https://oapi.dingtalk.com/robot/send?access_token=79b1100719c51a60877658bd24e1cdc9d758f55a678a5bf4f4061b8a924d6331'
 _DEFAULT_COMMON_WEBHOOK_URL = 'https://oapi.dingtalk.com/robot/send?access_token=d1c41a2a5bc285a143e535843c4633382ae43db2f19fc98811387bbe6ab0762e'
@@ -25,6 +28,15 @@ _ALERT_PERIOD_TO_SINA_KTYPE = {
 }
 _DEFAULT_CHART_PRIMARY = ('min', '分时')
 _DEFAULT_CHART_SECONDARY = ('daily', '日K')
+
+
+def _post_without_env_proxy(url, **kwargs):
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        return session.post(url, **kwargs)
+    finally:
+        session.close()
 
 
 def resolve_dingtalk_chart_types(chart_period=None):
@@ -73,7 +85,7 @@ def send_dingtalk_message(title, tsCode, chart_period=None, webhook_url=common):
     logging.info(title + "\n")
     if os.getenv('ENABLE_REQUESTS') is None:
         try:
-            response = requests.post(
+            response = _post_without_env_proxy(
                 webhook_url,
                 headers=headers,
                 json=data,
@@ -83,7 +95,7 @@ def send_dingtalk_message(title, tsCode, chart_period=None, webhook_url=common):
             if response.status_code >= 400:
                 logging.warning("钉钉推送失败 status=%s body=%s", response.status_code, response.text[:200])
         except Exception as e:
-            logging.warning("钉钉推送异常: %s", e)
+            logging.warning("钉钉推送异常: %s", type(e).__name__)
 
 
 def generate_stock_image_url(stock_code: str, k_type='min') -> str:

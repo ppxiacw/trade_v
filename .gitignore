@@ -10,3 +10,4 @@ venv/
 env/
 ENV/
 logs/
+.env
