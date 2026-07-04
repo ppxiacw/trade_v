@@ -977,6 +977,36 @@ def add_monitor_stock():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+@monitor_bp.route('/stocks/mute-alerts', methods=['POST'])
+def mute_all_monitor_stock_alerts():
+    """一键静默告警外发；告警判断和数据库记录保持正常。"""
+    try:
+        payload = request.get_json(silent=True) or {}
+        muted = _to_bool(payload.get('muted'), True)
+        alert_sender = get_alert_sender()
+        muted = alert_sender.set_push_muted(muted, persist=True)
+        return jsonify({
+            'success': True,
+            'message': '已静默企微/钉钉告警推送，告警记录仍会正常入库' if muted else '已恢复企微/钉钉告警推送',
+            'muted': muted,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@monitor_bp.route('/stocks/mute-alerts', methods=['GET'])
+def get_monitor_stock_alert_mute_status():
+    """查询告警外发静默状态。"""
+    try:
+        alert_sender = get_alert_sender()
+        return jsonify({
+            'success': True,
+            'muted': alert_sender.is_push_muted(),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @monitor_bp.route('/stocks/<string:stock_code>', methods=['PUT'])
 def update_monitor_stock(stock_code):
     """更新监控股票配置"""
