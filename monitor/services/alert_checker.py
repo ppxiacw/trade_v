@@ -1109,49 +1109,69 @@ class AlertChecker:
             return None, None
         return float(period_cfg['low']), float(period_cfg['high'])
 
+    def _rsi_boundary_zone(self, rsi_value, low_threshold, high_threshold):
+        """返回 RSI 所在区间：low / high / normal。"""
+        if rsi_value is None:
+            return 'normal'
+        if rsi_value <= low_threshold:
+            return 'low'
+        if rsi_value >= high_threshold:
+            return 'high'
+        return 'normal'
+
     def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6, period_cfg):
-        """检查RSI边界条件"""
+        """
+        检查RSI边界条件。
+        同侧连续越界只播报一次：进入极值区时告警，
+        回落到正常区间后再越界才会再次告警。
+        例（高位阈值 80）：
+          60→81→89→90 只报一次；
+          60→81→91→61→84 报两次。
+        """
         low_threshold, high_threshold = self._get_rsi_thresholds(period_cfg)
         if low_threshold is None or high_threshold is None:
             return None
 
         state_key = f"{stock}_{window}"
         if state_key not in self._rsi_trigger_states:
-            self._rsi_trigger_states[state_key] = {'last_rsi_triggered': False}
+            self._rsi_trigger_states[state_key] = {'active_zone': 'normal'}
 
         current_state = self._rsi_trigger_states[state_key]
         boundary_low_enabled = bool(period_cfg.get('boundary_low'))
         boundary_high_enabled = bool(period_cfg.get('boundary_high'))
         if not boundary_low_enabled and not boundary_high_enabled:
-            current_state['last_rsi_triggered'] = False
+            current_state['active_zone'] = 'normal'
             return None
 
-        if not low_threshold <= rsi_6 <= high_threshold:
-            is_low = rsi_6 <= low_threshold
-            is_high = rsi_6 >= high_threshold
-            if (is_low and not boundary_low_enabled) or (is_high and not boundary_high_enabled):
-                current_state['last_rsi_triggered'] = False
-                return None
+        prev_zone = self._rsi_boundary_zone(pre_rsi_6, low_threshold, high_threshold)
+        curr_zone = self._rsi_boundary_zone(rsi_6, low_threshold, high_threshold)
 
-            is_consecutive_trigger = (
-                pre_rsi_6 is not None and not low_threshold <= pre_rsi_6 <= high_threshold
-            )
+        if curr_zone == 'normal':
+            current_state['active_zone'] = 'normal'
+            return None
 
-            if not is_consecutive_trigger or not current_state['last_rsi_triggered']:
-                current_state['last_rsi_triggered'] = True
-                alert_type = '买点' if is_low else '卖点'
-                return self._create_alert_data(
-                    stock,
-                    f"({window}min)rsi_6:{rsi_6}",
-                    window,
-                    alert_type,
-                    chart_period=self._minute_window_to_chart_period(window),
-                )
-            current_state['last_rsi_triggered'] = True
-        else:
-            current_state['last_rsi_triggered'] = False
+        if (curr_zone == 'low' and not boundary_low_enabled) or (
+            curr_zone == 'high' and not boundary_high_enabled
+        ):
+            # 当前侧未启用时不占位，避免挡住另一侧后续进入告警
+            if current_state.get('active_zone') == curr_zone:
+                current_state['active_zone'] = 'normal'
+            return None
 
-        return None
+        # 仅在“进入”该极值区时告警；同侧连续停留不重复播报
+        entered_zone = prev_zone != curr_zone and current_state.get('active_zone') != curr_zone
+        current_state['active_zone'] = curr_zone
+        if not entered_zone:
+            return None
+
+        alert_type = '买点' if curr_zone == 'low' else '卖点'
+        return self._create_alert_data(
+            stock,
+            f"({window}min)rsi_6:{rsi_6}",
+            window,
+            alert_type,
+            chart_period=self._minute_window_to_chart_period(window),
+        )
 
     def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_6, last_k, prev_k, period_cfg):
         """检查RSI极端值的K线模式"""
