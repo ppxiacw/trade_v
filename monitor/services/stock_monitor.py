@@ -107,12 +107,23 @@ class StockMonitor:
                 with self.lock:
                     self.stock_data.update_data(data_list)
 
-                futures = []
-                for stock in stock_codes:
-                    futures.append(executor.submit(self.check_and_send_alerts, stock))
+                futures = [
+                    executor.submit(self.collect_stock_alerts, stock)
+                    for stock in stock_codes
+                ]
+                round_alerts = []
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        prepared = future.result() or []
+                    except Exception as exc:
+                        logging.error("单股告警检查失败: %s", exc)
+                        continue
+                    if prepared:
+                        round_alerts.extend(prepared)
 
-                # 等待所有检查完成
-                concurrent.futures.wait(futures)
+                # 同一轮轮询的告警合并成一条推送
+                if round_alerts:
+                    self.alert_sender.flush_round_alerts(round_alerts)
 
             except Exception as e:
                 logging.error(f"监控出错: {e}")
@@ -120,15 +131,19 @@ class StockMonitor:
             # 每次循环后等待一段时间，避免请求过于频繁
             time.sleep(self.config.BASE_INTERVAL)
 
-
-
+    def collect_stock_alerts(self, stock):
+        """并行检查单股告警，仅收集不推送。"""
+        if stock not in self.config.MONITOR_STOCKS:
+            return []
+        if not self._is_force_monitoring_enabled() and not self.is_market_open():
+            return []
+        alerts = self.alert_checker.check_all_conditions(stock)
+        if not alerts:
+            return []
+        return self.alert_sender.prepare_alerts(stock, alerts)
 
     def check_and_send_alerts(self, stock):
-        """并行检查并发送警报的辅助方法"""
-        if stock not in self.config.MONITOR_STOCKS:
-            return
-        if not self._is_force_monitoring_enabled() and not self.is_market_open():
-            return
-        alerts = self.alert_checker.check_all_conditions(stock)
-        if alerts:
-            self.alert_sender.send_alert(stock, alerts)
+        """兼容旧调用：检查并立即发送（不走轮询合并）。"""
+        prepared = self.collect_stock_alerts(stock)
+        if prepared:
+            self.alert_sender.flush_round_alerts(prepared)

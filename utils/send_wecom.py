@@ -74,11 +74,15 @@ def _get_access_token():
 
 def _build_markdown_message(title, ts_code, chart_period=None):
     (primary_k, primary_label), (secondary_k, secondary_label) = resolve_dingtalk_chart_types(chart_period)
+    body = str(title or '').strip()
+    headline = body.splitlines()[0] if body else '股票告警'
+    detail = "\n".join(body.splitlines()[1:]).strip() if body else ''
 
     lines = [
-        f"### 股票告警",
-        f"> {title}",
+        f"### {headline}",
     ]
+    if detail:
+        lines.append(detail)
     try:
         primary_url = generate_stock_image_url(ts_code, primary_k)
         secondary_url = generate_stock_image_url(ts_code, secondary_k)
@@ -95,10 +99,8 @@ def _build_markdown_message(title, ts_code, chart_period=None):
 
 def _build_text_message(title, ts_code, chart_period=None):
     (primary_k, primary_label), (secondary_k, secondary_label) = resolve_dingtalk_chart_types(chart_period)
-    lines = [
-        "股票告警",
-        title,
-    ]
+    body = str(title or '').strip() or '股票告警'
+    lines = [body]
     try:
         primary_url = generate_stock_image_url(ts_code, primary_k)
         secondary_url = generate_stock_image_url(ts_code, secondary_k)

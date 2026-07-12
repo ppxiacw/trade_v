@@ -60,13 +60,16 @@ def send_dingtalk_message(title, tsCode, chart_period=None, webhook_url=common):
     image_url2 = generate_stock_image_url(tsCode, secondary_k)
     if 'ma' in title:
         webhook_url = ma_webhook_url
+    # 卡片标题取首行，正文保留完整多条告警排版
+    body = str(title or '').strip()
+    card_title = body.splitlines()[0] if body else '股票告警'
     data = {
         "msgtype": "actionCard",
         "actionCard": {
-            "title": f"{title}\n\n !",
+            "title": card_title,
             "text": (
-                f"{title}\n\n "
-                f"![{primary_label}]({image_url1}) \n\n "
+                f"{body}\n\n"
+                f"![{primary_label}]({image_url1})\n\n"
                 f"![{secondary_label}]({image_url2})"
             ),
             "btns": [
