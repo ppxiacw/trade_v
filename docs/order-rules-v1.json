@@ -1,0 +1,617 @@
+{
+  "title": "下单规范 v1",
+  "purpose": "把看盘心得固化为可执行检查项，程序下单前弹出确认/硬限制",
+  "related_docs": [
+    "watch-self-check.html",
+    "kline-pattern-breakout.html",
+    "stock-bs-confirm-flow.html"
+  ],
+  "order_types": [
+    {
+      "id": "ULTRA_SHORT",
+      "name": "超短博弈突破",
+      "timeframes": ["1m", "5m"],
+      "rules": {
+        "cut_immediately_on_wrong": true,
+        "tolerate_noise": false,
+        "note": "见势不对立刻砍仓"
+      }
+    },
+    {
+      "id": "SWING_30M_DAILY",
+      "name": "30分钟/日K趋势单",
+      "timeframes": ["30m", "1d"],
+      "rules": {
+        "cut_immediately_on_wrong": false,
+        "tolerate_noise": true,
+        "note": "止损设好，对中间波动不过敏，大方向符合即可"
+      }
+    }
+  ],
+  "phases": [
+    {
+      "id": "PRE_MARKET",
+      "name": "盘前",
+      "checks": ["R01", "R02", "R03", "R04", "R05", "R06"]
+    },
+    {
+      "id": "STRUCTURE",
+      "name": "结构识别",
+      "checks": ["R10", "R11", "R12", "R13", "R14", "R15", "R16"]
+    },
+    {
+      "id": "DIRECTION",
+      "name": "方向与环境",
+      "checks": ["R20", "R21", "R22", "R23", "R24", "R25", "R26"]
+    },
+    {
+      "id": "BUY",
+      "name": "买入约束",
+      "checks": ["R30", "R31", "R32", "R33", "R34", "R35", "R36", "R37", "R38", "R39", "R40", "R41", "R42"]
+    },
+    {
+      "id": "HOLD",
+      "name": "持仓与止盈止损",
+      "checks": ["R50", "R51", "R52", "R53", "R54", "R55"]
+    },
+    {
+      "id": "SELL",
+      "name": "卖出约束",
+      "checks": ["R60", "R61", "R62", "R63", "R64"]
+    },
+    {
+      "id": "CORRELATED",
+      "name": "勾稽品种",
+      "checks": ["R70", "R71", "R72", "R73", "R74"]
+    },
+    {
+      "id": "FORBIDDEN",
+      "name": "硬禁止",
+      "checks": ["X01", "X02", "X03", "X04", "X05", "X06", "X07", "X08", "X09"]
+    }
+  ],
+  "rules": [
+    {
+      "id": "R01",
+      "phase": "PRE_MARKET",
+      "level": "must",
+      "prompt": "盘前是否已推演：上涨怎么走、下跌怎么走、最好/最差情况与点位预案？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R02",
+      "phase": "PRE_MARKET",
+      "level": "must",
+      "prompt": "前一日是否已定每只票的规矩：做T / 只B / 只S？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R03",
+      "phase": "PRE_MARKET",
+      "level": "warn",
+      "prompt": "美股次日若偏弱，是否预留仓位准备早盘低吸做T？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R04",
+      "phase": "PRE_MARKET",
+      "level": "warn",
+      "prompt": "大盘情绪不好时，条件单是否少挂，等个股+大盘信号再打重仓？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R05",
+      "phase": "PRE_MARKET",
+      "level": "must",
+      "prompt": "止盈/止损或目标下跌位是否已算好？（算好后只等，不揣测怎么走过去）",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R06",
+      "phase": "PRE_MARKET",
+      "level": "warn",
+      "prompt": "竞价计划：是否给自己余地（分批买 / 挂高一点）？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R10",
+      "phase": "STRUCTURE",
+      "level": "must",
+      "prompt": "当前有没有形态 / 波浪趋势 / 沿均线缓推？三者至少识别一种，或明确「都没有」。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R11",
+      "phase": "STRUCTURE",
+      "level": "must",
+      "prompt": "若都没有：前一个30分钟大趋势是第几波？若是第3波，是否接受「回调会很深」？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R12",
+      "phase": "STRUCTURE",
+      "level": "info",
+      "prompt": "30分钟三浪上涨：回调更深，第一前期高点可能撑不住；二浪支撑大概率可撑。",
+      "pass_action": "note",
+      "fail_action": "note",
+      "programmable": false
+    },
+    {
+      "id": "R13",
+      "phase": "STRUCTURE",
+      "level": "warn",
+      "prompt": "拉出距离是否够？不够则预期回调更深；突破过高也要看起始位，起点太低且突破不远→回踩可能深。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R14",
+      "phase": "STRUCTURE",
+      "level": "warn",
+      "prompt": "走趋势时：过高强度是否拉开距离？（拉开后才谈回踩）",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R15",
+      "phase": "STRUCTURE",
+      "level": "info",
+      "prompt": "见底形式：背离或加速。背离级别决定调整深度。",
+      "pass_action": "note",
+      "fail_action": "note",
+      "programmable": false
+    },
+    {
+      "id": "R16",
+      "phase": "STRUCTURE",
+      "level": "warn",
+      "prompt": "沿均线缓推时：小阴小阳形态不重要，除非放巨量。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R20",
+      "phase": "DIRECTION",
+      "level": "must",
+      "prompt": "相对大盘强弱是否看大级别？小级别一两分钟不作数。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R21",
+      "phase": "DIRECTION",
+      "level": "must",
+      "prompt": "方向形态是否结合板块 + 龙头 + 大盘判断向上突破 / 突破失败？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R22",
+      "phase": "DIRECTION",
+      "level": "must",
+      "prompt": "日内买卖是否结合板块与指数的支撑/压力与走势？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R23",
+      "phase": "DIRECTION",
+      "level": "warn",
+      "prompt": "任一指数/板块新高附近，是否防大回调？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R24",
+      "phase": "DIRECTION",
+      "level": "warn",
+      "prompt": "指数高点判断：是否用最强板块高点交叉印证？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R25",
+      "phase": "DIRECTION",
+      "level": "must",
+      "prompt": "大盘下跌趋势灯信号才抄底个股；大盘上涨趋势按点位买入。当前属于哪种？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R26",
+      "phase": "DIRECTION",
+      "level": "warn",
+      "prompt": "不要把突破当突破走势；也可能是趋势浪，会回落到突破点下方。波浪上升往往更常见。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R30",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "看弱做强：弱的见底/刚止跌，买最强的？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R31",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "竞价抄底：只买ETF，不买个股？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true,
+      "applies_when": "auction_bottom_fish"
+    },
+    {
+      "id": "R32",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "有效突破是否放量？早盘不放量，不认作突破结构。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true,
+      "applies_when": "breakout_buy"
+    },
+    {
+      "id": "R33",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "最近这波涨幅成交量是否比上一波上涨量大？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R34",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "30分钟走势是否复杂、毛刺多？（复杂毛刺多 → 不买）",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R35",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "日线刚开始回调且离目标支撑太远？→ 不短做多（反之亦然）。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R36",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "下跌趋势抄底：周/日是否有很强支撑？否则必须等日线止跌。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true,
+      "applies_when": "downtrend_bottom_fish"
+    },
+    {
+      "id": "R37",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "二次回踩支撑？→ 不做。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R38",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "早盘开盘翘头上拉再砸的当天 → 不买。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R39",
+      "phase": "BUY",
+      "level": "warn",
+      "prompt": "拉得太早→当天再下杀概率不小；临近下午见底抄底胜算更高。当前时点是否合适？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R40",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "银行企稳且有向上趋势时 → 不做个股。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R41",
+      "phase": "BUY",
+      "level": "warn",
+      "prompt": "跌破区间再回来：若处下跌末段，有可能直接突破——是否按末段处理？",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R42",
+      "phase": "BUY",
+      "level": "must",
+      "prompt": "看的周期K线：不做「最近低点=最低点」的多（除非更大级别超级低止损抄底）。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R50",
+      "phase": "HOLD",
+      "level": "must",
+      "prompt": "止盈位是否用形态对称 / 均线 / 整数点算好？算好后只等，不揣测路径。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R51",
+      "phase": "HOLD",
+      "level": "must",
+      "prompt": "第一天进场若误判 → 第二天竞价直接走？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R52",
+      "phase": "HOLD",
+      "level": "warn",
+      "prompt": "下跌趋势抄底第一把亏损且当日形态未走好 → 次日止盈放低，用5分钟近高而非30分钟。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R53",
+      "phase": "HOLD",
+      "level": "info",
+      "prompt": "之前有过回踩动作，一般不会再回头。",
+      "pass_action": "note",
+      "fail_action": "note",
+      "programmable": false
+    },
+    {
+      "id": "R54",
+      "phase": "HOLD",
+      "level": "warn",
+      "prompt": "抛压大的一天洗盘不够 → 次日早盘可能再杀一次。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R55",
+      "phase": "HOLD",
+      "level": "info",
+      "prompt": "光头光脚阳线后，第二个阴线不跌破阳线1/2 → 趋势仍在。",
+      "pass_action": "note",
+      "fail_action": "note",
+      "programmable": true
+    },
+    {
+      "id": "R60",
+      "phase": "SELL",
+      "level": "must",
+      "prompt": "卖出看最强：弱的已跌一会儿，强的刚开始跌 → 卖强的/全卖？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R61",
+      "phase": "SELL",
+      "level": "must",
+      "prompt": "先砸再拉的当天 → 不卖？",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R62",
+      "phase": "SELL",
+      "level": "must",
+      "prompt": "不做「最近高点=最高点」的空（除非更大级别超级低止损摸顶）。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R63",
+      "phase": "SELL",
+      "level": "warn",
+      "prompt": "大趋势后不直接A杀：至少30分钟多次大阴或多次顶背离；常见震荡下行。30分MACD绿柱→拉前高双顶→再猛跌。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R64",
+      "phase": "SELL",
+      "level": "warn",
+      "prompt": "高低点抬高很重要；但突破无力、回调过快是反转信号。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": true
+    },
+    {
+      "id": "R70",
+      "phase": "CORRELATED",
+      "level": "must",
+      "prompt": "勾稽品种：不做强势的空、不做弱势的多。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R71",
+      "phase": "CORRELATED",
+      "level": "must",
+      "prompt": "上涨时看强的能否先过压力；下跌时看弱的能否在支撑挺住。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "R72",
+      "phase": "CORRELATED",
+      "level": "warn",
+      "prompt": "强的新低抬高、弱的不破新低；有时强不破新低，弱也能被拉起。",
+      "pass_action": "allow",
+      "fail_action": "warn",
+      "programmable": false
+    },
+    {
+      "id": "R73",
+      "phase": "CORRELATED",
+      "level": "must",
+      "prompt": "勾稽不同步时：勿因A见顶空B；若A上升趋势且B筑底，应等A回调结束、B共振时追B多。",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": false
+    },
+    {
+      "id": "R74",
+      "phase": "CORRELATED",
+      "level": "info",
+      "prompt": "顺趋势单：支撑压力有效；逆趋势支撑不一定有效，但逆势反弹到压力做空成功率高。",
+      "pass_action": "note",
+      "fail_action": "note",
+      "programmable": false
+    },
+    {
+      "id": "X01",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：未算止盈/止损就下单并盘中揣测路径",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X02",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：用1-2分钟级别判断相对大盘强弱",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X03",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：竞价抄底买个股（只允许ETF）",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X04",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：二次回踩支撑再做",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X05",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：翘头上拉再砸的当天买入；先砸再拉的当天卖出",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X06",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：银行企稳向上趋势时做个股",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X07",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：勾稽里做强势空 / 弱势多",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X08",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：开盘后不再看日线（日线每天都要看）",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    },
+    {
+      "id": "X09",
+      "phase": "FORBIDDEN",
+      "level": "hard",
+      "prompt": "禁止：30分钟复杂毛刺走势上冲动开仓",
+      "pass_action": "allow",
+      "fail_action": "block",
+      "programmable": true
+    }
+  ],
+  "support_resistance_notes": [
+    "支撑压力常在一串阴线里的那根阳线附近；反弹也看这附近",
+    "往下找支撑时：看哪个被回踩过；没被回踩的更可能被回踩",
+    "到达关键点位前若已提前盘整，该点位可能失效",
+    "突破回落完全可能回到突破点下方",
+    "洗盘：观察股性——一次缩量还是两次；拉升第三日下杀回拉？高位深洗、刚启动浅洗",
+    "缩量回调不能有反弹波峰，否则削弱反弹动力甚至不反弹",
+    "普涨行情抱团股易解散",
+    "涨速很重要"
+  ],
+  "tp_methods": ["形态对称", "均线", "整数点"],
+  "next_program_hooks": [
+    "下单前按 order_type + phase 拉取 checks",
+    "must/hard 未确认 → 阻断下单",
+    "warn 未确认 → 二次确认弹窗",
+    "与 watch-self-check / breakout / bs-confirm 串联"
+  ]
+}

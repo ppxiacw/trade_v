@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>多周期形态与突破判断</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
+  <style>
+    :root {
+      --bg: #f7f5f1;
+      --card: #ffffff;
+      --text: #1c1917;
+      --muted: #57534e;
+      --line: #e7e5e4;
+      --up: #166534;
+      --down: #9f1239;
+      --ask: #1e3a5f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .lead { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 700px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .box h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+    .box p, .box li {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .box ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .tag-up { background: #dcfce7; color: var(--up); }
+    .tag-down { background: #ffe4e6; color: var(--down); }
+    .tag-ask { background: #e0e7ff; color: var(--ask); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      border-top: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .q {
+      margin: 0 0 8px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--ask);
+      background: #f0f4f8;
+      border-radius: 0 8px 8px 0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>多周期形态与突破判断</h1>
+    <p class="lead">
+      看股票时先扫各周期 K 线有没有趋势或形态；若是「选择方向」的形态，再结合板块、龙头股、大盘，判断是向上突破还是突破失败。
+    </p>
+
+    <section class="card">
+      <h2>流程图</h2>
+      <pre class="mermaid">
+flowchart TD
+    A[观察目标股各周期K线] --> B{是否存在趋势或形态？}
+    B -->|否| W[继续观察，暂不下结论]
+    B -->|是| C{是否为选择方向的形态？}
+
+    C -->|否 已有明确趋势| T[跟随现有趋势方向]
+    C -->|是 如整理末端/关键位抉择| D[进入方向确认]
+
+    D --> E[看板块走势]
+    D --> F[看龙头股走势]
+    D --> G[看大盘走势]
+
+    E --> H{三者是否共振偏多？}
+    F --> H
+    G --> H
+
+    H -->|是| UP[倾向：向上突破]
+    H -->|否 / 共振偏空| DN[倾向：突破失败]
+    H -->|信号混乱| WAIT[暂不下单，等待明朗]
+      </pre>
+    </section>
+
+    <section class="card">
+      <h2>看盘三步</h2>
+      <div class="grid">
+        <div class="box">
+          <h3>1. 多周期扫描</h3>
+          <ul>
+            <li>日线 / 60分 / 30分 / 15分等</li>
+            <li>找：趋势、整理、关键位形态</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>2. 识别形态性质</h3>
+          <ul>
+            <li>趋势型：已有方向，跟随</li>
+            <li>抉择型：临近突破，等确认</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>3. 三要素定方向</h3>
+          <ul>
+            <li>板块是否走强</li>
+            <li>龙头是否带头</li>
+            <li>大盘是否配合</li>
+          </ul>
+        </div>
+        <div class="box">
+          <h3>4. 结论</h3>
+          <p>
+            <span class="tag tag-up">向上突破</span>
+            或
+            <span class="tag tag-down">突破失败</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>方向确认话术</h2>
+      <p class="q">
+        <span class="tag tag-ask">形态出现时问</span>
+        这是选择方向的形态吗？如果是，板块、龙头、大盘现在偏多还是偏空？
+      </p>
+      <p class="q">
+        <span class="tag tag-up">偏多共振</span>
+        板块强 + 龙头强 + 大盘不拖后腿 → 倾向向上突破
+      </p>
+      <p class="q">
+        <span class="tag tag-down">偏空 / 不配合</span>
+        板块弱 / 龙头走弱 / 大盘走坏 → 倾向突破失败
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>对照表</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>观察点</th>
+            <th>看到什么</th>
+            <th>怎么用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>各周期 K 线</td>
+            <td>趋势、整理、形态</td>
+            <td>先判断有没有可交易结构</td>
+          </tr>
+          <tr>
+            <td>选择方向形态</td>
+            <td>箱体末端、三角收敛、关键阻力/支撑抉择</td>
+            <td>不提前猜，用外盘环境确认</td>
+          </tr>
+          <tr>
+            <td>板块</td>
+            <td>同板块是否整体走强</td>
+            <td>个股突破需要板块支撑</td>
+          </tr>
+          <tr>
+            <td>龙头股</td>
+            <td>龙头是否带头向上</td>
+            <td>龙头弱，跟风突破成功率低</td>
+          </tr>
+          <tr>
+            <td>大盘</td>
+            <td>指数是否配合 / 拖累</td>
+            <td>大盘走坏时，突破更易失败</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>和 B/S 确认流的衔接</h2>
+      <ul>
+        <li>本图先解决：方向是「向上突破」还是「突破失败」。</li>
+        <li>若判断向上突破，再进入买入确认：买强的，并问弱的是否止跌上涨。</li>
+        <li>若突破失败或强的开始走弱，再进入卖出确认。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

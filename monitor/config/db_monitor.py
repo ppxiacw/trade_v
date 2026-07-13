@@ -350,6 +350,17 @@ def exe_query(query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]
 class StockAlertDAO:
     """股票告警数据访问对象"""
 
+    # stock_alert_log 实际列；禁止把 chart_period 等运行时字段写入导致插入失败
+    _INSERT_COLUMNS = (
+        'stock_code',
+        'stock_name',
+        'alert_type',
+        'alert_level',
+        'alert_message',
+        'trigger_time',
+        'windows_sec',
+    )
+
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
@@ -385,7 +396,21 @@ class StockAlertDAO:
                 alert_message,
             )
             return None
-        return self.db.execute_insert('stock_alert_log', alert_data)
+
+        row = {
+            key: alert_data.get(key)
+            for key in self._INSERT_COLUMNS
+            if key in alert_data and alert_data.get(key) is not None
+        }
+        if not row.get('stock_code') or not row.get('alert_message') or row.get('trigger_time') is None:
+            logger.error("告警入库缺少必要字段: %s", row)
+            return None
+
+        skipped = sorted(set(alert_data.keys()) - set(row.keys()))
+        if skipped:
+            logger.debug("告警入库忽略非表字段: %s", skipped)
+
+        return self.db.execute_insert('stock_alert_log', row)
 
     def get_alerts_by_stock(self, stock_code: str, limit: int = 100) -> List[Dict[str, Any]]:
         """根据股票代码查询告警记录"""

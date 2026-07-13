@@ -20,6 +20,7 @@ from services.daily_kline_sync_service import (
     start_daily_kline_incremental_sync,
     get_daily_kline_sync_status,
 )
+from services.star_market_sync_service import sync_star_market_stocks
 
 stock_bp = Blueprint('stock', __name__)
 _logger = logging.getLogger(__name__)
@@ -300,6 +301,23 @@ def screen_theme_kline():
             'success': False,
             'message': f'板块/概念K线拉取失败，请稍后重试。详情: {str(e)}',
         }), 503
+
+
+@stock_bp.route('/stocks/sync_star_market', methods=['POST'])
+def sync_star_market():
+    """
+    批量补全科创板（688）到 stocks 表，供下拉搜索。
+    默认不开启监控。body 可选：{"dry_run": true}
+    """
+    payload = request.get_json(silent=True) or {}
+    dry_run = bool(payload.get('dry_run'))
+    try:
+        result = sync_star_market_stocks(dry_run=dry_run)
+        status = 200 if result.get('success') else 502
+        return jsonify(result), status
+    except Exception as e:
+        _logger.exception("同步科创板失败")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 @stock_bp.route('/reload_config')

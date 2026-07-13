@@ -1,3 +1,1 @@
-# 服务模块
-from . import order_service
-
+# 服务模块（避免在 import package 时强制加载重依赖）

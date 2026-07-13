@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>看盘自问：形态 / 波浪 / 均线缓推</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
+  <style>
+    :root {
+      --bg: #f7f5f1;
+      --card: #ffffff;
+      --text: #1c1917;
+      --muted: #57534e;
+      --line: #e7e5e4;
+      --ok: #166534;
+      --warn: #9f1239;
+      --ask: #1e3a5f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .lead { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 { margin: 0 0 12px; font-size: 16px; }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    .q {
+      margin: 0 0 8px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--ask);
+      background: #f0f4f8;
+      border-radius: 0 8px 8px 0;
+      font-size: 14px;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .tag-ask { background: #e0e7ff; color: var(--ask); }
+    .tag-ok { background: #dcfce7; color: var(--ok); }
+    .tag-warn { background: #ffe4e6; color: var(--warn); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      border-top: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 700px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .box h3 { margin: 0 0 8px; font-size: 14px; }
+    .box p { margin: 0; color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>看盘自问清单</h1>
+    <p class="lead">
+      先问自己：有没有形态？有没有波浪趋势？还是沿着均线缓推？都没有，再看前一个 30 分钟大趋势是第几波——第三波的回调通常会很深。
+    </p>
+
+    <section class="card">
+      <h2>流程图</h2>
+      <pre class="mermaid">
+flowchart TD
+    A[开始看盘] --> Q1{问：有没有形态？}
+    Q1 -->|有| M[按形态逻辑看<br/>再结合板块/龙头/大盘判方向]
+    Q1 -->|没有| Q2{问：有没有波浪趋势？}
+
+    Q2 -->|有| W[按波浪结构交易<br/>识别当前处于第几浪]
+    Q2 -->|没有| Q3{问：是沿着均线缓推？}
+
+    Q3 -->|是| MA[跟随均线缓推节奏<br/>不追急、不抢拐点]
+    Q3 -->|也没有| Q4[回看：前一个30分钟大趋势<br/>是第一波还是第几波？]
+
+    Q4 --> N1[第1波 / 第2波]
+    Q4 --> N3[第3波]
+
+    N1 --> C1[回调相对可控<br/>仍可按结构观察]
+    N3 --> C3[警惕：第三波回调深度会很深]
+      </pre>
+    </section>
+
+    <section class="card">
+      <h2>自问话术（按顺序）</h2>
+      <p class="q"><span class="tag tag-ask">①</span>有没有形态？</p>
+      <p class="q"><span class="tag tag-ask">②</span>有没有波浪趋势？</p>
+      <p class="q"><span class="tag tag-ask">③</span>是不是沿着均线缓推？</p>
+      <p class="q"><span class="tag tag-ask">④</span>都没有 → 前一个 30 分钟大趋势是第几波？</p>
+      <p class="q"><span class="tag tag-warn">重点</span>若是第三波：回调深度会很深，别按浅回调去接。</p>
+    </section>
+
+    <section class="card">
+      <h2>三种结构怎么用</h2>
+      <div class="grid">
+        <div class="box">
+          <h3><span class="tag tag-ok">形态</span></h3>
+          <p>有形态就走形态确认：是否选择方向、向上突破还是失败。</p>
+        </div>
+        <div class="box">
+          <h3><span class="tag tag-ok">波浪</span></h3>
+          <p>有波浪就数浪：知道现在第几浪，决定进攻还是等回调。</p>
+        </div>
+        <div class="box">
+          <h3><span class="tag tag-ok">均线缓推</span></h3>
+          <p>沿着均线慢慢推：跟节奏，不把缓推当成爆发突破去追。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>「都没有」时的 30 分钟波次表</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>前一个 30 分钟大趋势</th>
+            <th>含义</th>
+            <th>注意</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>第 1 波</td>
+            <td>趋势刚启动</td>
+            <td>回调通常不深，可观察是否延续</td>
+          </tr>
+          <tr>
+            <td>第 2 波</td>
+            <td>趋势延续中段</td>
+            <td>结构仍可能完整，留意强弱</td>
+          </tr>
+          <tr>
+            <td>第 3 波</td>
+            <td>大趋势末端特征更强</td>
+            <td><strong>回调深度会很深</strong>，防深回撤</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>和前后逻辑怎么接</h2>
+      <ul>
+        <li>本图是看盘入口：先识别当前属于哪种结构。</li>
+        <li>若有形态 → 接「多周期形态与突破判断」。</li>
+        <li>方向明确后 → 接「B/S 执行确认流」（买强、卖看强走弱）。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

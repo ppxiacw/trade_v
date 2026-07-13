@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>股票 B/S 执行确认流</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+  </script>
+  <style>
+    :root {
+      --bg: #f7f5f1;
+      --card: #ffffff;
+      --text: #1c1917;
+      --muted: #57534e;
+      --line: #e7e5e4;
+      --buy: #166534;
+      --sell: #9f1239;
+      --ask: #1e3a5f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .lead { color: var(--muted); margin: 0 0 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      border-top: 1px solid var(--line);
+      padding: 10px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .tag-b { background: #dcfce7; color: var(--buy); }
+    .tag-s { background: #ffe4e6; color: var(--sell); }
+    ul { margin: 0; padding-left: 18px; color: var(--muted); }
+    .q {
+      margin: 0 0 8px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--ask);
+      background: #f0f4f8;
+      border-radius: 0 8px 8px 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>股票 B/S 执行确认流</h1>
+    <p class="lead">先有操作意图，再反问条件；答「是」才执行，答「否」就先不做。</p>
+
+    <section class="card">
+      <h2>流程图</h2>
+      <pre class="mermaid">
+flowchart TD
+    A[准备执行操作] --> B[执行 B 买入]
+    A --> S[执行 S 卖出]
+
+    B --> BQ{问：弱的是否已经止跌上涨？}
+    BQ -->|是| BY[买入强的]
+    BQ -->|否| BN[先不买]
+
+    S --> SQ{问：强的开始走弱，且弱的已弱一阵子？}
+    SQ -->|是| SY[全卖]
+    SQ -->|否| SN[先不卖]
+      </pre>
+    </section>
+
+    <section class="card">
+      <h2>确认话术</h2>
+      <p class="q"><span class="tag tag-b">B</span> 「弱的已经止跌上涨了吗？」→ 是才买强的</p>
+      <p class="q"><span class="tag tag-s">S</span> 「强的开始走弱了吗？弱的是不是已经弱一阵子了？」→ 都是才全卖</p>
+    </section>
+
+    <section class="card">
+      <h2>对照表</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>操作</th>
+            <th>提问</th>
+            <th>是</th>
+            <th>否</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag tag-b">B 买入</span></td>
+            <td>弱的是否已经止跌上涨？</td>
+            <td>买入强的一方</td>
+            <td>先不买，继续等</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-s">S 卖出</span></td>
+            <td>强的开始走弱，且弱的已弱一阵子？</td>
+            <td>全卖</td>
+            <td>先不卖，继续持有</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>规则摘要</h2>
+      <ul>
+        <li>买：标的只买强的；执行前确认弱的已止跌上涨。</li>
+        <li>卖：触发看强的；执行前确认强的走弱，且弱的已弱一阵子。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -206,7 +206,15 @@ class AlertSender:
                     )
                     continue
 
-                stock_alert_dao.insert_alert(prepared)
+                alert_id = stock_alert_dao.insert_alert(prepared)
+                if not alert_id:
+                    _logger.error(
+                        "告警入库失败，已跳过推送: stock=%s trigger_time=%s message=%s",
+                        prepared.get('stock_code'),
+                        prepared.get('trigger_time'),
+                        prepared.get('alert_message'),
+                    )
+                    continue
                 push_alerts.append(prepared)
 
             if not push_alerts:

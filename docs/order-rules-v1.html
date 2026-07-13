@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>下单规范 v1</title>
+  <style>
+    :root {
+      --bg: #f7f5f1;
+      --card: #fff;
+      --text: #1c1917;
+      --muted: #57534e;
+      --line: #e7e5e4;
+      --hard: #9f1239;
+      --must: #9a3412;
+      --warn: #a16207;
+      --info: #1e3a5f;
+      --ok: #166534;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    main { max-width: 980px; margin: 0 auto; padding: 28px 18px 56px; }
+    h1 { margin: 0 0 6px; font-size: 28px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
+    .lead { color: var(--muted); margin: 0 0 20px; }
+    .nav {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      margin-bottom: 20px;
+    }
+    .nav a {
+      text-decoration: none; color: var(--text);
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 999px; padding: 6px 12px; font-size: 13px;
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 18px; margin-bottom: 14px;
+    }
+    .rule {
+      display: grid;
+      grid-template-columns: 64px 72px 1fr;
+      gap: 10px;
+      padding: 10px 0;
+      border-top: 1px solid var(--line);
+      font-size: 14px;
+      align-items: start;
+    }
+    .rule:first-of-type { border-top: none; }
+    .id { font-weight: 700; color: var(--muted); }
+    .lvl {
+      display: inline-block; padding: 1px 8px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; width: fit-content;
+    }
+    .hard { background: #ffe4e6; color: var(--hard); }
+    .must { background: #ffedd5; color: var(--must); }
+    .warn { background: #fef3c7; color: var(--warn); }
+    .info { background: #e0e7ff; color: var(--info); }
+    .ok { background: #dcfce7; color: var(--ok); }
+    ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
+      .rule { grid-template-columns: 56px 1fr; }
+      .lvl-wrap { grid-column: 1 / -1; }
+    }
+    .flow {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 13px; background: #f0f4f8; border-radius: 8px;
+      padding: 12px 14px; white-space: pre-wrap; color: var(--info);
+    }
+    .box {
+      border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+    }
+    .box p { margin: 0; color: var(--muted); font-size: 14px; }
+    .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    button.filter {
+      border: 1px solid var(--line); background: #fff; border-radius: 999px;
+      padding: 5px 12px; cursor: pointer; font-size: 13px;
+    }
+    button.filter.active { background: #1c1917; color: #fff; border-color: #1c1917; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>下单规范 v1</h1>
+  <p class="lead">
+    把炒股心得固化成「下单前必须回答的问题」。以后程序按规则 ID 弹确认：
+    <span class="lvl hard">硬禁止</span>
+    <span class="lvl must">必须确认</span> 不过 → 拦截下单；
+    <span class="lvl warn">警告</span> → 二次确认。
+  </p>
+
+  <div class="nav">
+    <a href="#flow">总流程</a>
+    <a href="#types">两种单</a>
+    <a href="#pre">盘前</a>
+    <a href="#struct">结构</a>
+    <a href="#dir">方向</a>
+    <a href="#buy">买入</a>
+    <a href="#hold">持仓</a>
+    <a href="#sell">卖出</a>
+    <a href="#corr">勾稽</a>
+    <a href="#forbid">硬禁止</a>
+    <a href="#notes">补充心法</a>
+  </div>
+
+  <section class="card" id="flow">
+    <h2>总流程（程序串联顺序）</h2>
+    <div class="flow">盘前预案 + 定规矩(做T/只B/只S)
+→ 看盘自问：形态 / 波浪 / 均线缓推 / 30分第几波
+→ 多周期形态：板块+龙头+大盘 → 突破 or 失败
+→ B确认：买强的？弱的止跌上涨了吗？
+→ S确认：强的走弱了吗？弱的已弱一阵子了吗？
+→ 按单类型执行：超短立刻砍 / 趋势单忍波动</div>
+    <p class="lead" style="margin-top:12px;margin-bottom:0">
+      关联图：
+      <a href="./watch-self-check.html">看盘自问</a> ·
+      <a href="./kline-pattern-breakout.html">形态突破</a> ·
+      <a href="./stock-bs-confirm-flow.html">B/S确认</a> ·
+      机器可读：<code>order-rules-v1.json</code>
+    </p>
+  </section>
+
+  <section class="card" id="types">
+    <h2>两种单子（先选类型，再套规则）</h2>
+    <div class="grid">
+      <div class="box">
+        <h3><span class="lvl hard">ULTRA_SHORT</span> 超短博弈突破</h3>
+        <p>依据：1分 / 5分信息即可开仓。<br/>约束：见势不对立刻砍仓，对噪声零容忍。</p>
+      </div>
+      <div class="box">
+        <h3><span class="lvl ok">SWING_30M_DAILY</span> 30分/日K趋势单</h3>
+        <p>依据：30分钟甚至日K。<br/>约束：止损设好，中间波动不过敏，大方向对即可。</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="filter-row" id="filters">
+    <button class="filter active" data-f="all">全部</button>
+    <button class="filter" data-f="hard">仅硬禁止</button>
+    <button class="filter" data-f="must">仅必须</button>
+    <button class="filter" data-f="warn">仅警告</button>
+  </div>
+
+  <section class="card phase" id="pre" data-phase="pre">
+    <h2>一、盘前</h2>
+    <div class="rule" data-lvl="must"><span class="id">R01</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>盘前推演：下跌怎么走？上涨怎么走？最好/最差情况与点位预案都写好了吗？</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R02</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>前一日是否定好每只票规矩：做T / 只B / 只S？</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R05</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>止盈位或要跌到的位置算好了吗？算好后只等，别揣测它怎么走过去。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R03</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>美股次日偏弱？是否留仓位准备早盘低吸做T？</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R04</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>大盘情绪差：条件单少挂，等个股+大盘信号再打重仓？</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R06</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>竞价买入给自己余地：分批买？还是挂高一点？</span></div>
+  </section>
+
+  <section class="card phase" id="struct">
+    <h2>二、结构识别（尽早判断）</h2>
+    <div class="rule" data-lvl="must"><span class="id">R10</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>有没有形态？有没有波浪趋势？还是沿均线缓推？</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R11</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>都没有 → 前一个30分钟大趋势是第几波？第三波回调会很深。</span></div>
+    <div class="rule" data-lvl="info"><span class="id">R12</span><span class="lvl-wrap"><span class="lvl info">心法</span></span><span>30分三浪上涨：回调更深；第一前期高点可能撑不住，二浪支撑大概率可撑。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R13</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>拉出距离不够 → 回调更深；突破距离不远且起点太低 → 回踩也可能深。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R14</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>走趋势时过高强度很重要：要拉开距离才能再谈回踩。</span></div>
+    <div class="rule" data-lvl="info"><span class="id">R15</span><span class="lvl-wrap"><span class="lvl info">心法</span></span><span>见底：背离或加速。背离级别决定调整深度。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R16</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>沿均线缓推：小阴小阳不重要，除非放巨量。</span></div>
+  </section>
+
+  <section class="card phase" id="dir">
+    <h2>三、方向与环境</h2>
+    <div class="rule" data-lvl="must"><span class="id">R20</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>比大盘强弱看大级别；小级别一两分钟不能作数。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R21</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>选择方向形态：用板块 + 龙头 + 大盘判向上突破还是突破失败。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R22</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>个股日内买卖结合板块和指数的支撑压力与走势。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R25</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>大盘下跌趋势：灯信号抄底个股；大盘上涨趋势：看点位买入。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R23</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>任意指数/板块新高附近防大回调。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R24</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>指数高点可用最强板块高点交叉印证。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R26</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>别一见突破就当突破走势；也可能是趋势浪，会回落到突破点下方。</span></div>
+  </section>
+
+  <section class="card phase" id="buy">
+    <h2>四、买入约束</h2>
+    <div class="rule" data-lvl="must"><span class="id">R30</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>看弱做强：弱的刚止跌/见底时，买最强的。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R31</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>竞价抄底：买ETF，不买个股。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R32</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>有效突破看成交量；早盘不放量，不认突破结构。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R33</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>最近这波涨幅量是否比之前上涨时量大？涨速是否够？</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R34</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>30分钟走势复杂、毛刺多 → 不买。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R35</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>日线刚回调且离目标支撑太远 → 不短做多（反之亦然）。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R36</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>下跌趋势抄底：周/日要有很强支撑，否则等日线止跌再入。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R37</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>二次回踩支撑 → 不做。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R38</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>早盘翘头上拉再砸的当天 → 不买。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R40</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>银行企稳且有向上趋势 → 不做个股。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R42</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>不做最近低点=最低点的多（除非更大级别超低止损抄底）。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R39</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>拉太早当天再下杀概率大；临近下午见底抄底胜算更高。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R41</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>跌破区间再回来：若下跌末段，有可能直接突破。</span></div>
+  </section>
+
+  <section class="card phase" id="hold">
+    <h2>五、持仓 / 止盈止损</h2>
+    <div class="rule" data-lvl="must"><span class="id">R50</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>止盈：形态对称 / 均线 / 整数点。算好后等，不猜路径。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R51</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>第一天进场误判 → 第二天竞价直接走。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R52</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>下跌抄底第一把亏且当日形态未好 → 次日止盈放低，用5分钟近高而非30分。</span></div>
+    <div class="rule" data-lvl="info"><span class="id">R53</span><span class="lvl-wrap"><span class="lvl info">心法</span></span><span>之前有过回踩，一般不会再回头。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R54</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>抛压大的一天洗不够 → 次日早盘可能再杀一次。</span></div>
+    <div class="rule" data-lvl="info"><span class="id">R55</span><span class="lvl-wrap"><span class="lvl info">心法</span></span><span>光头光脚阳线后，第二根阴线不破阳线1/2 → 趋势还在。</span></div>
+  </section>
+
+  <section class="card phase" id="sell">
+    <h2>六、卖出约束</h2>
+    <div class="rule" data-lvl="must"><span class="id">R60</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>卖看最强：弱的已跌一会儿，强的刚开始跌 → 卖强的/全卖。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R61</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>先砸再拉的当天 → 不卖。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R62</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>不做最近高点=最高点的空（除非更大级别超低止损摸顶）。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R63</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>大趋势后不直接A杀：至少30分多次大阴或多次顶背离。常见：MACD绿柱→拉前高双顶→猛跌。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R64</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>高低点抬高重要；突破无力、回调过快是反转信号。</span></div>
+  </section>
+
+  <section class="card phase" id="corr">
+    <h2>七、勾稽品种</h2>
+    <div class="rule" data-lvl="must"><span class="id">R70</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>不做勾稽里强势的空、弱势的多。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R71</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>上涨看强的能否先过压力；下跌看弱的能否在支撑挺住。</span></div>
+    <div class="rule" data-lvl="must"><span class="id">R73</span><span class="lvl-wrap"><span class="lvl must">必须</span></span><span>不同步时别乱空：A上升且B筑底 → 等A回调结束、共振时追B多（创业板/恒生科技教训）。</span></div>
+    <div class="rule" data-lvl="warn"><span class="id">R72</span><span class="lvl-wrap"><span class="lvl warn">警告</span></span><span>强的新低抬高、弱的不破新低；有时强不破新低，弱也能被拉起。</span></div>
+    <div class="rule" data-lvl="info"><span class="id">R74</span><span class="lvl-wrap"><span class="lvl info">心法</span></span><span>顺趋势支撑压力有效；逆趋势支撑不一定有效，但反弹到压力做空成功率高。</span></div>
+  </section>
+
+  <section class="card phase" id="forbid">
+    <h2>八、硬禁止（程序直接拦截）</h2>
+    <div class="rule" data-lvl="hard"><span class="id">X01</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>未算止盈/止损就下单，并盘中揣测路径</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X02</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>用1–2分钟级别判断相对大盘强弱</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X03</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>竞价抄底买个股</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X04</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>二次回踩支撑再做</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X05</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>翘拉再砸当天买；先砸再拉当天卖</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X06</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>银行企稳向上趋势时做个股</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X07</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>勾稽做强势空 / 弱势多</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X08</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>开盘后不再看日线（日线每天都要看）</span></div>
+    <div class="rule" data-lvl="hard"><span class="id">X09</span><span class="lvl-wrap"><span class="lvl hard">硬禁</span></span><span>30分钟复杂毛刺走势冲动开仓</span></div>
+  </section>
+
+  <section class="card" id="notes">
+    <h2>补充心法（暂作提示，不全做硬拦）</h2>
+    <ul>
+      <li>支撑压力常在一串阴线里的那根阳线附近；反弹也看这附近。</li>
+      <li>往下找支撑：看哪个被回踩过；没被回踩的更可能被回踩。</li>
+      <li>关键点位前若已提前盘整，该点位可能失效。</li>
+      <li>突破回落完全可能回到突破点下方。</li>
+      <li>观察股性：拉升后洗盘一次缩量还是两次；拉升第三日下杀回拉？高位深洗、刚启动浅洗。</li>
+      <li>缩量回调过程不能有反弹波峰，否则削弱反弹动力。</li>
+      <li>普涨行情，抱团股容易解散。</li>
+      <li>大趋势后做空至少要在30分看到多次大阴或多次顶背离；常见震荡下行。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>后续程序怎么用</h2>
+    <ol style="margin:0;padding-left:18px;color:var(--muted);font-size:14px">
+      <li>下单时选择：ULTRA_SHORT / SWING_30M_DAILY</li>
+      <li>按阶段拉取 <code>order-rules-v1.json</code> 中对应 checks</li>
+      <li><span class="lvl hard">hard</span>/<span class="lvl must">must</span> 未勾选确认 → 阻断</li>
+      <li><span class="lvl warn">warn</span> → 二次确认弹窗</li>
+      <li>与现有三张流程图串联成完整下单闸门</li>
+    </ol>
+  </section>
+</main>
+<script>
+  const buttons = document.querySelectorAll("button.filter");
+  const rules = document.querySelectorAll(".rule");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      buttons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const f = btn.dataset.f;
+      rules.forEach((r) => {
+        const lvl = r.dataset.lvl;
+        const show = f === "all" || lvl === f;
+        r.classList.toggle("hidden", !show);
+      });
+    });
+  });
+</script>
+</body>
+</html>
