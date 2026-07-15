@@ -1090,16 +1090,19 @@ class AlertChecker:
         if not period_cfg:
             return alerts
 
-        rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-1], 6).__round__(1)
-        pre_rsi_6 = IndicatorCalculation.calculate_rsi(results_min[:-2], 6).__round__(1)
+        rsi_len = 12
+        rsi_value = IndicatorCalculation.calculate_rsi(results_min[:-1], rsi_len).__round__(1)
+        pre_rsi_value = IndicatorCalculation.calculate_rsi(results_min[:-2], rsi_len).__round__(1)
 
         # RSI边界警报
-        rsi_alert = self._check_rsi_boundary(stock, window, rsi_6, pre_rsi_6, period_cfg)
+        rsi_alert = self._check_rsi_boundary(stock, window, rsi_value, pre_rsi_value, period_cfg)
         if rsi_alert:
             alerts.append(rsi_alert)
 
         # RSI极端值模式
-        extreme_alerts = self._check_rsi_extreme_patterns(stock, window, pre_rsi_6, last_k, prev_k, period_cfg)
+        extreme_alerts = self._check_rsi_extreme_patterns(
+            stock, window, pre_rsi_value, last_k, prev_k, period_cfg
+        )
         alerts.extend(extreme_alerts)
 
         return alerts
@@ -1119,7 +1122,7 @@ class AlertChecker:
             return 'high'
         return 'normal'
 
-    def _check_rsi_boundary(self, stock, window, rsi_6, pre_rsi_6, period_cfg):
+    def _check_rsi_boundary(self, stock, window, rsi_value, pre_rsi_value, period_cfg):
         """
         检查RSI边界条件。
         同侧连续越界只播报一次：进入极值区时告警，
@@ -1143,8 +1146,8 @@ class AlertChecker:
             current_state['active_zone'] = 'normal'
             return None
 
-        prev_zone = self._rsi_boundary_zone(pre_rsi_6, low_threshold, high_threshold)
-        curr_zone = self._rsi_boundary_zone(rsi_6, low_threshold, high_threshold)
+        prev_zone = self._rsi_boundary_zone(pre_rsi_value, low_threshold, high_threshold)
+        curr_zone = self._rsi_boundary_zone(rsi_value, low_threshold, high_threshold)
 
         if curr_zone == 'normal':
             current_state['active_zone'] = 'normal'
@@ -1167,32 +1170,32 @@ class AlertChecker:
         alert_type = '买点' if curr_zone == 'low' else '卖点'
         return self._create_alert_data(
             stock,
-            f"({window}min)rsi_6:{rsi_6}",
+            f"({window}min)rsi_12:{rsi_value}",
             window,
             alert_type,
             chart_period=self._minute_window_to_chart_period(window),
         )
 
-    def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_6, last_k, prev_k, period_cfg):
+    def _check_rsi_extreme_patterns(self, stock, window, pre_rsi_value, last_k, prev_k, period_cfg):
         """检查RSI极端值的K线模式"""
         alerts = []
         low_threshold, high_threshold = self._get_rsi_thresholds(period_cfg)
         if low_threshold is None or high_threshold is None:
             return alerts
 
-        if period_cfg.get('reversal_low') and pre_rsi_6 <= low_threshold and self._is_bullish_reversal(last_k, prev_k):
+        if period_cfg.get('reversal_low') and pre_rsi_value <= low_threshold and self._is_bullish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock,
-                f"({window}min)rsi_6_up",
+                f"({window}min)rsi_12_up",
                 window,
                 '买点',
                 chart_period=self._minute_window_to_chart_period(window),
             ))
 
-        if period_cfg.get('reversal_high') and pre_rsi_6 >= high_threshold and self._is_bearish_reversal(last_k, prev_k):
+        if period_cfg.get('reversal_high') and pre_rsi_value >= high_threshold and self._is_bearish_reversal(last_k, prev_k):
             alerts.append(self._create_alert_data(
                 stock,
-                f"({window}min)rsi_6_down",
+                f"({window}min)rsi_12_down",
                 window,
                 '卖点',
                 chart_period=self._minute_window_to_chart_period(window),
@@ -1207,13 +1210,13 @@ class AlertChecker:
         if not period_cfg or not period_cfg.get('engulfing'):
             return alerts
 
-        rsi_6 = None
+        rsi_value = None
         try:
-            rsi_6 = float(IndicatorCalculation.calculate_rsi(results_min[:-1], 6))
+            rsi_value = float(IndicatorCalculation.calculate_rsi(results_min[:-1], 12))
         except Exception:
-            rsi_6 = None
+            rsi_value = None
 
-        engulfing_alert = self._check_engulfing_pattern(stock, window, last_k, prev_k, rsi_6, period_cfg)
+        engulfing_alert = self._check_engulfing_pattern(stock, window, last_k, prev_k, rsi_value, period_cfg)
         if engulfing_alert:
             alerts.append(engulfing_alert)
 
@@ -1222,9 +1225,9 @@ class AlertChecker:
 
         return alerts
 
-    def _check_engulfing_pattern(self, stock, window, last_k, prev_k, rsi_6=None, period_cfg=None):
+    def _check_engulfing_pattern(self, stock, window, last_k, prev_k, rsi_value=None, period_cfg=None):
         """检查吞没形态"""
-        if rsi_6 is None or not period_cfg:
+        if rsi_value is None or not period_cfg:
             return None
 
         low_threshold, high_threshold = self._get_rsi_thresholds(period_cfg)
@@ -1233,7 +1236,7 @@ class AlertChecker:
 
         if (last_k['open'] < prev_k['close'] < prev_k['open'] < last_k['close'] and
                 last_k['close'] > last_k['open'] and last_k['amount'] > prev_k['amount'] and
-                rsi_6 < low_threshold):
+                rsi_value < low_threshold):
             return self._create_alert_data(
                 stock,
                 f"({window}min)engulfing_up",
@@ -1244,7 +1247,7 @@ class AlertChecker:
 
         if (last_k['open'] > prev_k['close'] > prev_k['open'] > last_k['close'] and
               last_k['close'] < last_k['open'] and last_k['amount'] > prev_k['amount'] and
-              rsi_6 > high_threshold):
+              rsi_value > high_threshold):
             return self._create_alert_data(
                 stock,
                 f"({window}min)engulfing_down",

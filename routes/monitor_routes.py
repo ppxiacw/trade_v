@@ -427,11 +427,11 @@ def _normalize_alert_type_for_client(alert_type, alert_message):
     message = str(alert_message or '')
     if normalized == '观察':
         lowered = message.lower()
-        if 'rsi_6_up' in lowered:
+        if 'rsi_6_up' in lowered or 'rsi_12_up' in lowered:
             return '买点'
-        if 'rsi_6_down' in lowered:
+        if 'rsi_6_down' in lowered or 'rsi_12_down' in lowered:
             return '卖点'
-        rsi_match = re.search(r"rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
+        rsi_match = re.search(r"rsi_(?:6|12)\s*:\s*([0-9]+(?:\.[0-9]+)?)", lowered)
         if rsi_match:
             try:
                 rsi_value = float(rsi_match.group(1))
@@ -1565,23 +1565,25 @@ def get_alert_history():
                 params.extend(['背离', '顶背离', '底背离'])
             elif alert_type == '买点':
                 conditions.append(
-                    "(l.alert_type = %s OR (l.alert_type = %s AND (l.alert_message LIKE %s OR l.alert_message REGEXP %s)))"
+                    "(l.alert_type = %s OR (l.alert_type = %s AND (l.alert_message LIKE %s OR l.alert_message LIKE %s OR l.alert_message REGEXP %s)))"
                 )
                 params.extend([
                     '买点',
                     '观察',
                     '%rsi_6_up%',
-                    'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)',
+                    '%rsi_12_up%',
+                    'rsi_(6|12):[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)',
                 ])
             elif alert_type == '卖点':
                 conditions.append(
-                    "(l.alert_type = %s OR (l.alert_type = %s AND (l.alert_message LIKE %s OR l.alert_message REGEXP %s)))"
+                    "(l.alert_type = %s OR (l.alert_type = %s AND (l.alert_message LIKE %s OR l.alert_message LIKE %s OR l.alert_message REGEXP %s)))"
                 )
                 params.extend([
                     '卖点',
                     '观察',
                     '%rsi_6_down%',
-                    'rsi_6:[[:space:]]*([8-9][0-9](\\.[0-9]+)?)',
+                    '%rsi_12_down%',
+                    'rsi_(6|12):[[:space:]]*([8-9][0-9](\\.[0-9]+)?)',
                 ])
             elif alert_type in {'顶背离', '底背离'}:
                 message_keyword = '%顶背离%' if alert_type == '顶背离' else '%底背离%'
@@ -1756,10 +1758,10 @@ def get_alert_stats():
         type_query = """
             SELECT
                 CASE
-                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_up%' THEN '买点'
-                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_down%' THEN '卖点'
-                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
-                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([8-9][0-9](\\.[0-9]+)?)' THEN '卖点'
+                    WHEN alert_type = '观察' AND (alert_message LIKE '%rsi_6_up%' OR alert_message LIKE '%rsi_12_up%') THEN '买点'
+                    WHEN alert_type = '观察' AND (alert_message LIKE '%rsi_6_down%' OR alert_message LIKE '%rsi_12_down%') THEN '卖点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_(6|12):[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_(6|12):[[:space:]]*([8-9][0-9](\\.[0-9]+)?)' THEN '卖点'
                     WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
                     WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
                     ELSE alert_type
@@ -1769,10 +1771,10 @@ def get_alert_stats():
             WHERE trigger_time >= %s AND trigger_time < %s
             GROUP BY
                 CASE
-                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_up%' THEN '买点'
-                    WHEN alert_type = '观察' AND alert_message LIKE '%rsi_6_down%' THEN '卖点'
-                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
-                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_6:[[:space:]]*([8-9][0-9](\\.[0-9]+)?)' THEN '卖点'
+                    WHEN alert_type = '观察' AND (alert_message LIKE '%rsi_6_up%' OR alert_message LIKE '%rsi_12_up%') THEN '买点'
+                    WHEN alert_type = '观察' AND (alert_message LIKE '%rsi_6_down%' OR alert_message LIKE '%rsi_12_down%') THEN '卖点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_(6|12):[[:space:]]*([0-1]?[0-9](\\.[0-9]+)?)' THEN '买点'
+                    WHEN alert_type = '观察' AND alert_message REGEXP 'rsi_(6|12):[[:space:]]*([8-9][0-9](\\.[0-9]+)?)' THEN '卖点'
                     WHEN alert_type = '背离' AND alert_message LIKE '%顶背离%' THEN '顶背离'
                     WHEN alert_type = '背离' AND alert_message LIKE '%底背离%' THEN '底背离'
                     ELSE alert_type

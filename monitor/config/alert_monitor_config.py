@@ -223,12 +223,12 @@ def classify_rsi_message_side(message: str, stock_cfg: Optional[Dict[str, Any]],
     low = period_cfg['low'] if period_cfg else 20
     high = period_cfg['high'] if period_cfg else 80
 
-    if 'rsi_6_up' in lowered or 'engulfing_up' in lowered:
+    if 'rsi_6_up' in lowered or 'rsi_12_up' in lowered or 'engulfing_up' in lowered:
         return 'buy'
-    if 'rsi_6_down' in lowered or 'engulfing_down' in lowered:
+    if 'rsi_6_down' in lowered or 'rsi_12_down' in lowered or 'engulfing_down' in lowered:
         return 'sell'
-    if 'rsi_6:' in lowered:
-        match = re.search(r'rsi_6\s*:\s*([0-9]+(?:\.[0-9]+)?)', lowered)
+    if 'rsi_6:' in lowered or 'rsi_12:' in lowered:
+        match = re.search(r'rsi_(?:6|12)\s*:\s*([0-9]+(?:\.[0-9]+)?)', lowered)
         if match:
             try:
                 value = float(match.group(1))
