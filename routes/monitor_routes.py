@@ -1053,13 +1053,16 @@ def remove_monitor_stock_by_id(stock_id):
 
 @monitor_bp.route('/stocks/<string:stock_code>/price-thresholds', methods=['POST'])
 def add_stock_price_threshold(stock_code):
-    """追加股票价格到达告警：上涨到某价或下跌到某价。"""
+    """追加股票价格到达告警：上涨到某价或下跌到某价。
+    若标的不在监控列表中，会自动创建/重新启用监控后再写入阈值。
+    """
     try:
         _ensure_monitor_stock_columns_once()
         data = request.get_json() or {}
-        row = _find_stock_row_by_aliases(stock_code, data.get('stock_name', ''))
-        if not row:
-            return jsonify({'success': False, 'message': '股票不存在，请先加入监控'}), 404
+        stock_name = str(data.get('stock_name') or '').strip()
+        normalized_code = normalize_monitor_stock_code(stock_code, stock_name)
+        if not normalized_code:
+            return jsonify({'success': False, 'message': '股票代码不能为空'}), 400
 
         try:
             price = round(float(data.get('price')), 4)
@@ -1071,6 +1074,42 @@ def add_stock_price_threshold(stock_code):
         direction = str(data.get('direction') or '').strip().lower()
         if direction not in {'above', 'below'}:
             return jsonify({'success': False, 'message': '方向必须为 above 或 below'}), 400
+
+        row = (
+            _find_stock_row_by_exact_code(normalized_code)
+            or _find_stock_row_by_aliases(stock_code, stock_name)
+        )
+        auto_joined = False
+        if not row:
+            checker = get_alert_checker()
+            insert_data = {
+                'stock_code': normalized_code,
+                'stock_name': stock_name or normalized_code,
+                'is_monitor': 1,
+                'sort_order': _get_next_monitor_sort_order(),
+                'price_thresholds': _price_thresholds_to_storage_text([]),
+            }
+            insert_data.update(_resolve_alert_patch_from_request({}, checker))
+            stock_id = db_manager.execute_insert('stocks', insert_data)
+            if not stock_id:
+                return jsonify({'success': False, 'message': '自动加入监控失败'}), 409
+            row = _find_stock_row_by_id(stock_id)
+            if not row:
+                return jsonify({'success': False, 'message': '自动加入监控失败'}), 500
+            auto_joined = True
+        elif not row.get('is_monitor'):
+            db_manager.execute_update(
+                'stocks',
+                {
+                    'is_monitor': 1,
+                    'stock_code': normalized_code,
+                    'stock_name': stock_name or row.get('stock_name') or normalized_code,
+                    'sort_order': _get_next_monitor_sort_order(),
+                },
+                'id = %s',
+                (row['id'],),
+            )
+            auto_joined = True
 
         thresholds = _parse_json_array(row.get('price_thresholds'))
         threshold = {
@@ -1095,11 +1134,17 @@ def add_stock_price_threshold(stock_code):
             (row['id'],),
         )
         monitor_count = _reload_monitor_runtime()
+        message = (
+            '已自动加入监控并添加价格告警'
+            if auto_joined
+            else '价格告警已添加并自动生效'
+        )
         return jsonify({
             'success': True,
-            'message': '价格告警已添加并自动生效',
+            'message': message,
             'data': threshold,
             'thresholds': deduped,
+            'auto_joined': auto_joined,
             'monitor_count': monitor_count,
         })
     except Exception as e:

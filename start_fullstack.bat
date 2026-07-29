@@ -7,6 +7,7 @@ set "BACKEND_DIR=%~dp0"
 if "%BACKEND_DIR:~-1%"=="\" set "BACKEND_DIR=%BACKEND_DIR:~0,-1%"
 for %%I in ("%BACKEND_DIR%\..") do set "WORKSPACE_DIR=%%~fI"
 set "FRONTEND_DIR=%WORKSPACE_DIR%\trader_front"
+set "QMT_DIR=%FRONTEND_DIR%\qmt"
 set "VENV_PY=%BACKEND_DIR%\.venv\Scripts\python.exe"
 set "PYTHON_EXE="
 set "FRONTEND_VITE_BIN=%FRONTEND_DIR%\node_modules\.bin\vite.cmd"
@@ -16,6 +17,8 @@ set "BACKEND_LOG=%LOG_DIR%\backend.log"
 set "BACKEND_ERR_LOG=%LOG_DIR%\backend.err.log"
 set "FRONTEND_LOG=%LOG_DIR%\frontend.log"
 set "FRONTEND_ERR_LOG=%LOG_DIR%\frontend.err.log"
+set "QMT_LOG=%LOG_DIR%\qmt_gateway.log"
+set "QMT_ERR_LOG=%LOG_DIR%\qmt_gateway.err.log"
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
@@ -120,6 +123,7 @@ call :stop_port_listener 5000
 call :stop_port_listener 5173
 call :stop_port_listener 5174
 call :stop_port_listener 5175
+call :stop_port_listener 8001
 
 echo Starting backend...
 call :write_log_header "%BACKEND_LOG%" "trade_v backend stdout"
@@ -135,15 +139,53 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$p = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','dev','--','--port','%FRONTEND_PORT%','--strictPort') -WorkingDirectory '%FRONTEND_DIR%' -WindowStyle Hidden -RedirectStandardOutput '%FRONTEND_LOG%' -RedirectStandardError '%FRONTEND_ERR_LOG%' -PassThru;" ^
   "Write-Host ('[INFO] Frontend PID ' + $p.Id + ' logging to logs\frontend.log')"
 
+if exist "%QMT_DIR%\signal_gateway.py" (
+  set "QMT_PY="
+  if exist "%QMT_DIR%\.venv\Scripts\python.exe" set "QMT_PY=%QMT_DIR%\.venv\Scripts\python.exe"
+  if not defined QMT_PY if exist "%WORKSPACE_DIR%\qmt\.venv\Scripts\python.exe" set "QMT_PY=%WORKSPACE_DIR%\qmt\.venv\Scripts\python.exe"
+  if not defined QMT_PY set "QMT_PY=%PYTHON_EXE%"
+
+  "%QMT_PY%" -c "import fastapi,uvicorn,pymysql,yaml" >nul 2>nul
+  if errorlevel 1 (
+    echo [INFO] Installing QMT gateway dependencies...
+    set "HTTP_PROXY="
+    set "HTTPS_PROXY="
+    set "ALL_PROXY="
+    set "NO_PROXY=*"
+    set "PIP_NO_PROXY=*"
+    "%QMT_PY%" -m pip install -r "%QMT_DIR%\requirements-gateway.txt" ^
+      --index-url https://pypi.tuna.tsinghua.edu.cn/simple ^
+      --trusted-host pypi.tuna.tsinghua.edu.cn ^
+      --trusted-host pypi.org ^
+      --trusted-host files.pythonhosted.org
+  )
+  "%QMT_PY%" -c "import fastapi,uvicorn" >nul 2>nul
+  if errorlevel 1 (
+    echo [WARN] QMT gateway deps missing — skip port 8001. Run: pip install -r trader_front\qmt\requirements-gateway.txt
+  ) else (
+    echo Starting QMT signal gateway...
+    call :write_log_header "%QMT_LOG%" "qmt signal_gateway stdout"
+    call :write_log_header "%QMT_ERR_LOG%" "qmt signal_gateway stderr"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$p = Start-Process -FilePath '%QMT_PY%' -ArgumentList @('signal_gateway.py') -WorkingDirectory '%QMT_DIR%' -WindowStyle Hidden -RedirectStandardOutput '%QMT_LOG%' -RedirectStandardError '%QMT_ERR_LOG%' -PassThru;" ^
+      "Write-Host ('[INFO] QMT gateway PID ' + $p.Id + ' logging to logs\qmt_gateway.log')"
+  )
+) else (
+  echo [WARN] QMT gateway not found at %QMT_DIR%\signal_gateway.py — skip port 8001.
+)
+
 echo Done. Services are running in background:
 echo - Backend:  http://127.0.0.1:5000
 echo - Frontend: http://127.0.0.1:%FRONTEND_PORT%
+echo - QMT UI:   http://127.0.0.1:%FRONTEND_PORT%/#/qmt  (API :8001)
 echo [TIP] Script auto-clears listeners on ports 5000/5173-5175 before launch.
 echo [TIP] Logs:
 echo   Backend stdout:  logs\backend.log
 echo   Backend stderr:  logs\backend.err.log
 echo   Frontend stdout: logs\frontend.log
 echo   Frontend stderr: logs\frontend.err.log
+echo   QMT stdout:      logs\qmt_gateway.log
+echo   QMT stderr:      logs\qmt_gateway.err.log
 
 endlocal
 exit /b 0
@@ -161,7 +203,7 @@ REM 仅按端口/窗口标题清理，避免误杀当前正在执行本脚本的
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='SilentlyContinue';" ^
   "$ids = New-Object 'System.Collections.Generic.HashSet[int]';" ^
-  "foreach($port in @(5000,5173,5174,5175)){" ^
+  "foreach($port in @(5000,5173,5174,5175,8001)){" ^
   "  Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object {" ^
   "    if($_.OwningProcess -gt 0){ [void]$ids.Add([int]$_.OwningProcess) }" ^
   "  }" ^
