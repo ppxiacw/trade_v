@@ -145,23 +145,24 @@ if exist "%QMT_DIR%\signal_gateway.py" (
   if not defined QMT_PY if exist "%WORKSPACE_DIR%\qmt\.venv\Scripts\python.exe" set "QMT_PY=%WORKSPACE_DIR%\qmt\.venv\Scripts\python.exe"
   if not defined QMT_PY set "QMT_PY=%PYTHON_EXE%"
 
-  "%QMT_PY%" -c "import fastapi,uvicorn,pymysql,yaml" >nul 2>nul
-  if errorlevel 1 (
-    echo [INFO] Installing QMT gateway dependencies...
-    set "HTTP_PROXY="
-    set "HTTPS_PROXY="
-    set "ALL_PROXY="
-    set "NO_PROXY=*"
-    set "PIP_NO_PROXY=*"
-    "%QMT_PY%" -m pip install -r "%QMT_DIR%\requirements-gateway.txt" ^
-      --index-url https://pypi.tuna.tsinghua.edu.cn/simple ^
-      --trusted-host pypi.tuna.tsinghua.edu.cn ^
-      --trusted-host pypi.org ^
-      --trusted-host files.pythonhosted.org
-  )
+  echo [INFO] QMT Python: %QMT_PY%
   "%QMT_PY%" -c "import fastapi,uvicorn" >nul 2>nul
   if errorlevel 1 (
-    echo [WARN] QMT gateway deps missing — skip port 8001. Run: pip install -r trader_front\qmt\requirements-gateway.txt
+    echo [INFO] Installing QMT gateway dependencies into current QMT Python...
+    call "%QMT_PY%" -m pip install -r "%QMT_DIR%\requirements-gateway.txt" --index-url https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn --trusted-host pypi.org --trusted-host files.pythonhosted.org
+  )
+
+  REM 若 trade_v venv 仍缺依赖，再尝试旁路独立 qmt\.venv
+  "%QMT_PY%" -c "import fastapi,uvicorn" >nul 2>nul
+  if errorlevel 1 if exist "%WORKSPACE_DIR%\qmt\.venv\Scripts\python.exe" (
+    set "QMT_PY=%WORKSPACE_DIR%\qmt\.venv\Scripts\python.exe"
+    echo [INFO] Fallback QMT Python: %QMT_PY%
+  )
+
+  "%QMT_PY%" -c "import fastapi,uvicorn" >nul 2>nul
+  if errorlevel 1 (
+    echo [WARN] QMT gateway deps missing — skip port 8001.
+    echo [TIP] Run manually: trader_front\start_qmt.bat
   ) else (
     echo Starting QMT signal gateway...
     call :write_log_header "%QMT_LOG%" "qmt signal_gateway stdout"
